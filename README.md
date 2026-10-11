@@ -161,6 +161,29 @@ extended for the games above. The toolchain package that ships with the app cont
 source together with prebuilt ANGLE and MoltenVK libraries and their licence texts; see
 [THIRD-PARTY.md](THIRD-PARTY.md).
 
+## Thanks to Glovebox
+
+[Glovebox](https://github.com/glovebox-vr/glovebox) brings Half-Life: Alyx to the Apple Vision Pro on its own, and
+its developers published all of it under the MIT licence. A good part of how Half-Life: Alyx runs here was worked
+out there first. Thank you – for the work, and for making it open.
+
+What this project took over from Glovebox, each named in the source where it lives:
+
+- **Shaders prepared before the game starts.** The game's Vulkan pipelines are compiled while the start window is
+  still up, with Valve's [Fossilize](https://github.com/ValveSoftware/Fossilize), instead of one at a time in the
+  middle of play. The method, the recorder and replayer, the recipe format and Glovebox's own pipeline list for
+  the game are theirs. The list holds no shader code, only where each shader is in your own copy of the game;
+  your Mac rebuilds it from that copy.
+- **Steam Cloud saves.** The connection to Steam, the sign-in and the two-way sync of saves are parts of
+  Glovebox's `SteamLauncherKit`, with its rules for never replacing a save by something it did not come from.
+- **Graphics settings that fit those shaders:** its detail settings for the game, a lighter final pass onto the
+  display, and textures that stream in faster.
+- **A frame is handed over when the graphics chip has finished it**, rather than the game waiting for that.
+- **Free Apple accounts.** That a free account is enough for a game this large – Apple grants it the extra
+  memory – is something Glovebox showed.
+
+These changes are in the toolchain's source and come to the app with its next toolchain release.
+
 ## Legal
 
 AVP Play is an independent open-source project. It is **not affiliated with, endorsed by or supported by Apple,
