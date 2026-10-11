@@ -38,6 +38,7 @@ extension AppModel {
                 catalogProblem = "\(error)"
             }
         }
+        reportUsage()
     }
 
     /// Eigene und gemerkte Spiele stehen im Katalog irgendwo zwischen tausenden; nach ihnen wird gezielt gefragt,
@@ -268,6 +269,39 @@ extension AppModel {
             } catch {
                 notice = "\(error)"
             }
+        }
+    }
+
+    // MARK: Zählung
+
+    /// Gezählt wird nur für ein Programmpaket (nicht beim Entwickeln), nur mit eingeschaltetem Katalog und nur,
+    /// solange es in den Einstellungen nicht abgestellt ist.
+    private var counting: Bool { onlineCatalog && usageCounts && Bundle.main.bundleIdentifier != nil && Snapshot.directory == nil }
+
+    /// Sagt dem Dienst höchstens einmal am Tag, dass diese Kopie in Gebrauch ist – ohne Kennung, siehe `UsagePing`.
+    /// Der Tag wird vor dem Senden gemerkt, damit zwei Anläufe kurz hintereinander nicht doppelt zählen, und
+    /// zurückgenommen, wenn die Meldung nicht ankommt.
+    func reportUsage() {
+        let key = "lastUsagePing"
+        let last = UserDefaults.standard.string(forKey: key)
+        let now = Date()
+        guard counting, let ping = UsagePing.due(last: last, now: now, appVersion: appVersion) else { return }
+        UserDefaults.standard.set(UsagePing.day(now), forKey: key)
+        let client = catalogClient
+        Task {
+            if (try? await client.send(ping)) == nil { UserDefaults.standard.set(last, forKey: key) }
+        }
+    }
+
+    /// Sagt dem Dienst, dass ein Spiel installiert wurde – für jedes Spiel ein einziges Mal, nur sein Name.
+    func reportInstall(_ recipe: Recipe) {
+        let key = "countedInstalls"
+        guard counting, let game = UsagePing.gameKey(appId: recipe.store.appId, recipe: recipe.id),
+              !(UserDefaults.standard.stringArray(forKey: key) ?? []).contains(game) else { return }
+        let client = catalogClient
+        Task {
+            guard (try? await client.countInstall(of: game)) != nil else { return }
+            UserDefaults.standard.set((UserDefaults.standard.stringArray(forKey: key) ?? []) + [game], forKey: key)
         }
     }
 }

@@ -162,6 +162,8 @@ final class AppModel: ObservableObject {
     @Published var favourites: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "favourites") ?? [])
     @Published var sentFeedback: [String: String] = UserDefaults.standard.dictionary(forKey: "sentFeedback") as? [String: String] ?? [:]
     @AppStorage("onlineCatalog") var onlineCatalog = true
+    /// Dem Katalog sagen, dass die App in Gebrauch ist und welche Spiele installiert wurden – ohne Kennung.
+    @AppStorage("usageCounts") var usageCounts = true
     /// Titelbilder für Spiele, die noch nicht geladen sind, von deren öffentlicher Store-Seite holen.
     @AppStorage("storePictures") var storePictures = true
     /// Besorgt diese Bilder: zwei Abrufe zugleich, mit Zwischenspeicher.
@@ -899,7 +901,11 @@ final class AppModel: ObservableObject {
         runningTask = nil
         runningJob = nil
         copyProgress[id] = nil
-        if !cancelled, let job = try? paths.jobs.load(id) { notify(job) }
+        if !cancelled, let job = try? paths.jobs.load(id) {
+            notify(job)
+            if job.state == .finished, !job.isDownloadOnly, !job.isAddonSync { reportInstall(job.recipe) }
+        }
+        reportUsage()
         refresh()
         pump()
         if runningJob == nil, let token = awake {
