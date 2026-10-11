@@ -199,3 +199,28 @@ final class SavesAndListsTests: XCTestCase {
         XCTAssertFalse(shown.contains("Downloaded to this Mac"))
     }
 }
+
+final class WithheldStatusTests: XCTestCase {
+    func testAFileMetaWithholdsIsNotMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("avpplay-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ContentStore(root: root)
+        let apk = RecipeFile(name: "game.apk", role: "apk", id: "1", size: 4, sha256: nil, required: true, dest: "")
+        let bought = RecipeFile(name: "pakchunk4.pak", role: "content-bundle", id: "2", size: nil, sha256: nil, required: true, dest: "android-files/obb")
+        let notBought = RecipeFile(name: "pakchunk5.pak", role: "content-bundle", id: "3", size: nil, sha256: nil, required: true, dest: "android-files/obb")
+        let r = Recipe(schema: 1, id: "demo", title: "Demo", package: "com.example.demo", versionName: "1.0", versionCode: 7,
+                       store: .init(appId: "123456"), toolchain: .init(target: "demo", minCommit: "abc"), files: [apk, bought, notBought],
+                       addons: nil, status: .init(playability: "verified", download: "listed", notes: nil), icon: nil)
+        try FileManager.default.createDirectory(at: store.directory(for: r), withIntermediateDirectories: true)
+        try Data(count: 4).write(to: store.url(for: apk, in: r))
+        try Data(count: 9).write(to: store.url(for: bought, in: r))
+        var status = GameStatus.of(recipe: r, store: store, apps: nil, toolchainVersion: nil)
+        XCTAssertEqual([status.filesPresent, status.filesRequired, status.filesToDownload], [2, 3, 1])
+        XCTAssertFalse(status.stockComplete)
+        // Meta hat die dritte Datei für dieses Konto abgelehnt: Sie gehört nicht mehr zu dem, was fehlt.
+        try store.noteWithheld(notBought, in: r)
+        status = GameStatus.of(recipe: r, store: store, apps: nil, toolchainVersion: nil)
+        XCTAssertEqual([status.filesPresent, status.filesRequired, status.filesToDownload], [2, 2, 0])
+        XCTAssertTrue(status.stockComplete)
+    }
+}

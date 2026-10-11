@@ -37,7 +37,11 @@ public struct GameStatus: Sendable, Equatable {
     /// - Parameter bundlePrefix: das Präfix, unter dem die Spiele installiert werden; ohne Angabe das übliche.
     public static func of(recipe r: Recipe, store: ContentStore, apps: [InstalledApp]?, toolchainVersion: Int?,
                           bundlePrefix: String? = nil) -> GameStatus {
-        let required = r.files.filter(\.required)
+        // Was Meta diesem Konto nicht ausliefert (ein nicht gekaufter Zusatzinhalt, siehe `ContentStore.Withheld`),
+        // fehlt nicht: Es wird nie geladen und steht dem Spiel nicht im Weg. Ohne das stünde bei einem Spiel wie
+        // Maestro für immer „3 von 11 Dateien“, obwohl alles da ist, was dem Konto zusteht.
+        let withheld = store.withheld(for: r)
+        let required = r.files.filter { $0.required && !withheld.contains($0.id) }
         func present(_ f: RecipeFile) -> Bool {
             ContentStore.fileSize(store.url(for: f, in: r)).map { f.size == nil || f.size == $0 } ?? false
         }
