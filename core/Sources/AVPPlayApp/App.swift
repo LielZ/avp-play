@@ -25,7 +25,10 @@ struct AVPPlayApp: App {
         .defaultSize(width: 1120, height: 760)
         .environment(\.locale, L10n.locale)
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button(L("Export Game List …", "Spieleliste exportieren …")) { model.exportGameList() }.keyboardShortcut("e")
+                Button(L("Fetch Saved Games from the Vision Pro", "Spielstände von der Vision Pro holen")) { model.fetchAllSaves() }
+            }
             CommandGroup(replacing: .appInfo) {
                 Button(L("About AVP Play", "Über AVP Play")) { AboutPanel.show() }
                 Button(L("Check for Updates …", "Nach Updates suchen …")) {
@@ -152,6 +155,7 @@ struct RootView: View {
             model.checkAccount()
             model.loadCatalog()
             model.reconcileBackgroundService()
+            model.startSaveWatch()
             await model.checkForUpdate(manual: false)
             await Snapshot.runIfRequested(model: model)
         }
@@ -178,7 +182,9 @@ struct DeviceChip: View {
                 .foregroundStyle(model.device == nil ? Color.secondary : Color.green)
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.device?.name ?? L("No Vision Pro", "Keine Vision Pro")).font(.callout.weight(.medium)).lineLimit(1)
-                Text(model.device == nil ? L("not reachable", "nicht erreichbar") : L("connected", "verbunden")).font(.caption).foregroundStyle(.secondary)
+                Text(model.device == nil ? L("not reachable", "nicht erreichbar")
+                     : model.device?.transport.map { L("connected over \($0.text)", "verbunden über \($0.text)") } ?? L("connected", "verbunden"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }

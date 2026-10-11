@@ -50,8 +50,28 @@ extension AppModel {
         guard !missing.isEmpty else { return }
         askedOwn.formUnion(missing)
         Task {
-            if let found = try? await catalogClient.games(appIds: missing) { merge(found) }
+            // Kommt keine Antwort, gelten die Kennungen nicht als gefragt: der nächste Anlass fragt neu.
+            do { merge(try await catalogClient.games(appIds: missing)) } catch { askedOwn.subtract(missing) }
         }
+    }
+
+    /// Holt, was der Katalog über die Favoriten sagt, die noch nicht geladen sind, und wartet darauf – damit eine
+    /// Liste der Favoriten vollständig ist, auch wenn die Übersicht erst einen Teil des Katalogs geladen hat.
+    /// Sagt, wie viele danach noch fehlen (kein Netz, Katalog abgeschaltet, vom Katalog nicht mehr geführt).
+    @discardableResult
+    func loadAllFavourites() async -> Int {
+        func missing() -> [String] {
+            let loaded = Set(catalog.map(\.appId)).union(games.compactMap { $0.recipe.store.appId })
+            return favourites.compactMap(DraftRecipe.appId(of:)).filter { !loaded.contains($0) }.sorted()
+        }
+        let wanted = missing()
+        guard !wanted.isEmpty else { return 0 }
+        guard onlineCatalog else { return wanted.count }
+        if let found = try? await catalogClient.games(appIds: wanted) {
+            merge(found)
+            askedOwn.formUnion(wanted)
+        }
+        return missing().count
     }
 
     /// Sucht im Katalog. Der Dienst lernt dabei neue Spiele kennen; hier kommen sie als „ungetestet“ an.
@@ -78,7 +98,7 @@ extension AppModel {
     /// nächste Seite des ganzen Katalogs. Mit einem Filter, der nur auf diesem Mac entschieden wird, nicht: was
     /// installiert oder gemerkt ist, steht schon vollständig da.
     var canLoadMore: Bool {
-        guard onlineCatalog, !filterInstalled, !filterFavourites else { return false }
+        guard onlineCatalog, !filterInstalled, !filterFavourites, !filterDownloaded else { return false }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.isEmpty else { return query == searchedQuery && searchMore }
         // Geprüftes und von Nutzern Bestätigtes steht im Katalog vorn. Ist einer dieser Filter gesetzt, lohnt

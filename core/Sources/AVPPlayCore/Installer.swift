@@ -47,8 +47,8 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
                      "\(title) kann auf der Vision Pro nicht laufen. Dieser Build ist ein 32-Bit-Spiel (er enthält nur Code für \(list)); der Prozessor der Vision Pro führt ausschließlich 64-Bit-Code aus, und dieses Werkzeug übersetzt 64-Bit-Spiele der Quest. Daran lässt sich von hier aus nichts ändern – nur ein 64-Bit-Build des Entwicklers würde gehen. Die schon geladenen Dateien lassen sich auf der Seite des Spiels entfernen.")
         case .freeTeamFull(let title, let installed):
             let list = installed.joined(separator: ", ")
-            return L("\(title) was not installed: a free Apple account may have only \(AppleMessages.freeAppsPerDevice) apps on the Vision Pro at a time, and these are already there: \(list). Remove one on the headset (press and hold its icon, then “Remove App”), then choose “Resume”. A paid developer membership has no such limit.",
-                     "\(title) wurde nicht installiert: Ein kostenloses Apple-Konto darf nur \(AppleMessages.freeAppsPerDevice) Apps gleichzeitig auf der Vision Pro haben, und diese sind schon dort: \(list). Entferne eine auf dem Headset (Icon gedrückt halten, dann „App entfernen“) und wähle dann „Fortsetzen“. Eine bezahlte Entwickler-Mitgliedschaft hat diese Grenze nicht.")
+            return L("\(title) was not installed: a free Apple account may have only \(AppleMessages.freeAppsPerDevice) apps on the Vision Pro at a time, and these are already there: \(list). Remove one on the headset (press and hold its icon, then “Remove App”), then choose “Resume”. A paid developer membership has no such limit. Before you remove a game, let AVP Play fetch its saved games (the game's page, “Saved Games”): they stay on this Mac and are put back when you install the game again.",
+                     "\(title) wurde nicht installiert: Ein kostenloses Apple-Konto darf nur \(AppleMessages.freeAppsPerDevice) Apps gleichzeitig auf der Vision Pro haben, und diese sind schon dort: \(list). Entferne eine auf dem Headset (Icon gedrückt halten, dann „App entfernen“) und wähle dann „Fortsetzen“. Eine bezahlte Entwickler-Mitgliedschaft hat diese Grenze nicht. Bevor du ein Spiel entfernst, lass AVP Play seine Spielstände holen (Seite des Spiels, „Spielstände“): Sie bleiben auf diesem Mac und werden zurückgespielt, wenn du das Spiel wieder installierst.")
         case .appRunning(let title):
             return L("\(title) is currently running on the Vision Pro. Installing would quit the game. Quit the game, then resume.",
                      "\(title) läuft gerade auf der Vision Pro. Eine Installation würde das Spiel beenden. Spiel beenden und dann fortsetzen.")
@@ -80,6 +80,9 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     /// gebaut wird (das APK, bei einem Linux-Spiel seine Ordner) – die großen Datendateien liegen schon auf dem
     /// Gerät und dürfen auf dem Mac inzwischen fehlen. Ohne Angabe: nein.
     public var resign: Bool?
+    /// Nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn auf dem Gerät noch keine liegen (ein frisch
+    /// installiertes Spiel). Ohne Angabe: nein.
+    public var restoreSaves: Bool?
 
     public init(toolchain: String) { self.toolchain = toolchain }
 }
@@ -128,10 +131,13 @@ public struct InstallProgress: Sendable, Equatable {
     public var step: InstallStep
     public var done: Int64
     public var total: Int64
-    public init(step: InstallStep, done: Int64, total: Int64) {
+    /// Worüber kopiert wird (Kabel oder WLAN), soweit bekannt.
+    public var via: Device.Transport?
+    public init(step: InstallStep, done: Int64, total: Int64, via: Device.Transport? = nil) {
         self.step = step
         self.done = done
         self.total = total
+        self.via = via
     }
 }
 
@@ -455,6 +461,18 @@ public struct Installer: Sendable {
     /// Ergänzend kopieren: nur was auf dem Gerät fehlt oder eine andere Größe hat.
     func stage() throws {
         let (device, bundle, toolchain) = try target()
+        // Worüber kopiert wird, entscheidet macOS: am Kabel über das Kabel, sonst über das WLAN. Gesagt wird es hier,
+        // weil es über Minuten oder Stunden entscheidet.
+        if let via = device.transport {
+            progress(InstallProgress(step: .stage, done: 0, total: 0, via: via))
+            switch via {
+            case .cable: report(L("Connection to the Vision Pro: USB cable.", "Verbindung zur Vision Pro: USB-Kabel."))
+            case .wifi:
+                report(L("Connection to the Vision Pro: Wi-Fi. With a USB cable on the Developer Strap, macOS copies over the cable instead, which is much faster for large games.",
+                         "Verbindung zur Vision Pro: WLAN. Mit einem USB-Kabel am Developer Strap kopiert macOS stattdessen über das Kabel – bei großen Spielen deutlich schneller."))
+            case .other(let raw): report(L("Connection to the Vision Pro: \(raw).", "Verbindung zur Vision Pro: \(raw)."))
+            }
+        }
         // Ein Entwurf lässt offen, wo die Haupt-Datendatei hingehört; jetzt, mit entpacktem APK, weiß es die Toolchain.
         var obb: String?
         var packageFolder: String?
@@ -515,7 +533,13 @@ public struct Installer: Sendable {
         var copied: Int64 = 0
         if copyTotal > 0 { progress(InstallProgress(step: .stage, done: 0, total: copyTotal)) }
         for (n, item) in items.enumerated() {
+            // Eine große Datei braucht über das WLAN Minuten. Damit der Balken dabei nicht stillsteht, wird das Gerät
+            // währenddessen gefragt, wie viel von ihr schon dort liegt.
+            let watching = StopFlag()
+            pollFileProgress(item, device: device, bundle: bundle, before: copied, total: copyTotal, until: watching)
+            defer { watching.stop() }
             try copyWithRetry(item, to: device, bundle: bundle)
+            watching.stop()
             copied += item.size
             progress(InstallProgress(step: .stage, done: copied, total: copyTotal))
             if items.count <= 20 || (n + 1) % 10 == 0 || n + 1 == items.count {
@@ -586,6 +610,8 @@ public struct Installer: Sendable {
             report(L("Server list copied to the game.", "Serverliste zum Spiel kopiert."))
         }
 
+        if request.restoreSaves == true { restoreSaves(device: device, bundle: bundle) }
+
         // Assets aus dem APK: als Ordner, wenn Anzahl oder Gesamtgröße abweichen. Der entpackte Baum entsteht
         // beim Build; fehlt er (Kopieren ohne vorherigen Build mit dieser Toolchain), wird er hier angelegt.
         try toolchain.prepare(recipe: recipe, store: store)
@@ -616,6 +642,24 @@ public struct Installer: Sendable {
                      "Assets: \(localCount) Dateien kopiert (\(Installer.gigabytes(localBytes)))."))
         } else {
             report(L("Assets: \(localCount) files are already on the device.", "Assets: \(localCount) Dateien liegen schon auf dem Gerät."))
+        }
+    }
+
+    /// Spielt die zuletzt geholten Spielstände zurück, wenn das Spiel auf dem Gerät noch keine hat. Geht das nicht,
+    /// ist die Installation deshalb nicht gescheitert: Es wird gesagt, und der Knopf auf der Seite des Spiels bleibt.
+    func restoreSaves(device: Device, bundle: String) {
+        let sync = SaveSync(store: store)
+        guard let snapshot = sync.saves.snapshots(for: recipe).first else { return }
+        do {
+            let n = try sync.restore(snapshot, recipe: recipe, device: device, bundle: bundle, mode: .ifNoneThere)
+            if n > 0 {
+                let when = DateFormatter.localizedString(from: snapshot.taken, dateStyle: .medium, timeStyle: .short)
+                report(n == 1 ? L("Saved games: one file from \(when) put back on the device.", "Spielstände: eine Datei vom \(when) aufs Gerät zurückgespielt.")
+                              : L("Saved games: \(n) files from \(when) put back on the device.", "Spielstände: \(n) Dateien vom \(when) aufs Gerät zurückgespielt."))
+            }
+        } catch {
+            report(L("Saved games could not be put back (\(Redaction.redact("\(error)"))). The game's page offers it again.",
+                     "Die Spielstände ließen sich nicht zurückspielen (\(Redaction.redact("\(error)"))). Die Seite des Spiels bietet es erneut an."))
         }
     }
 
@@ -716,6 +760,29 @@ public struct Installer: Sendable {
                     if !stop.isSet { progress(InstallProgress(step: .stage, done: min(done, total), total: total)) }
                 }
                 for _ in 0..<Int(seconds * 2) where !stop.isSet { Thread.sleep(forTimeInterval: 0.5) }
+            }
+        }
+    }
+
+    /// Ab dieser Größe wird während des Kopierens einer einzelnen Datei nachgefragt, wie weit sie ist.
+    static let watchedFileSize: Int64 = 48 << 20
+
+    /// Fragt das Gerät während des Kopierens einer großen Datei alle paar Sekunden, wie groß sie dort schon ist, und
+    /// meldet das als Fortschritt – bis `until` gesetzt ist. Am Gerät gemessen (visionOS 27.2, 2026-10-11): die
+    /// Datei steht von Anfang an in der Liste und wächst mit. Eine Abfrage, die scheitert, wird übergangen.
+    func pollFileProgress(_ item: StageItem, device: Device, bundle: String, before: Int64, total: Int64,
+                          every seconds: TimeInterval = 2, until stop: StopFlag) {
+        guard item.size >= Installer.watchedFileSize, total > 0 else { return }
+        let control = self.control, progress = self.progress
+        let folder = (item.destination as NSString).deletingLastPathComponent, name = (item.destination as NSString).lastPathComponent
+        Thread.detachNewThread {
+            while !stop.isSet {
+                for _ in 0..<Int(seconds * 4) where !stop.isSet { Thread.sleep(forTimeInterval: 0.25) }
+                guard !stop.isSet, let files = try? control.files(device: device, bundle: bundle, subdirectory: folder),
+                      let there = files.first(where: { $0.relativePath == name && !$0.isDirectory })?.size else { continue }
+                // Nie ganz voll, solange die Datei nicht als fertig gemeldet ist – und nie rückwärts.
+                let part = min(there, item.size - 1)
+                if !stop.isSet, part > 0 { progress(InstallProgress(step: .stage, done: min(before + part, total), total: total)) }
             }
         }
     }

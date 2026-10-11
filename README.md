@@ -44,7 +44,27 @@ The app speaks English and German. It follows macOS; you can choose a language i
 **Your disk space.** The page *Data* lists what has been downloaded, game by game and down to the file, and
 removes it again. Under Settings › Downloads you can keep the downloads on another disk, for example an external
 one; what is already there moves over, with a progress bar. While that disk is not connected, nothing is
-downloaded or installed.
+downloaded or installed. The folders there are named after identifiers; a text file beside them, `AVP Play –
+Index.txt`, says which folder is which game, and a game's page shows its folder in Finder.
+
+**Your saved games.** AVP Play copies what a game has saved from the Vision Pro to your Mac: after you quit the
+game, every few hours while the app is open, and on a button. Each change is kept as a copy of its own, so
+nothing is overwritten, and the copies stay when you remove the game from the headset – which a free Apple
+account, with its three apps at a time, makes you do. Install the game again and it gets its saved games back,
+if it has none on the headset; a button on the game's page puts a copy back on request. The copies never leave
+your Mac: they are kept in `AVP Play Saved Games` next to your downloads folder if you have chosen one, otherwise
+with the app's data. This covers games that come as an Android app – all Meta Store games, Doom 3,
+Counter-Strike – and not yet the ones that run as Linux programs (Half-Life: Alyx, which has Steam Cloud
+instead). Settings › Saved Games turns the automatic part off.
+
+**Cable or Wi-Fi.** Games are copied to the headset over whatever connects it to the Mac. With a USB cable on
+the Developer Strap macOS uses the cable by itself, and copying is many times faster; Setup, the sidebar and the
+progress line of a job say which connection is in use.
+
+**Your list of games.** The games you have downloaded, the ones in your Meta account and your favourites can be
+written to a text file (*Data* › Export Game List, or the list the overview shows with *Installed*, *Downloaded,
+Not Installed* or *Favourites* set) – to pass on, for example to this project, so that it knows which games
+people have that do not run yet. It is only a list: no game files, nothing about your account or device.
 
 **Updates.** Once a day the app asks GitHub whether a newer release exists and offers to install it. It replaces
 itself only with a version that is signed by the same developer and notarised by Apple. You can turn the check

@@ -107,6 +107,8 @@ avpplay – command line for the AVP Play core library
   avpplay install <id> --team <team ID>        build, install, copy missing data, unlock add-on content
   avpplay stage <id>                           only copy missing data and add-on content (no build)
   avpplay renew [--dry-run] [--force <id>]     sign installed games again whose signature runs out soon (what the background service does)
+  avpplay saves [<id> …] [--saves <folder>]    fetch the saved games of installed games from the Vision Pro to this Mac (nothing changes on the device)
+  avpplay saves <id> --restore                 put the newest copy back on the Vision Pro, replacing what is there (which is fetched first)
   avpplay servers <id> [add <address> [--name <name>] [--admin-stdin] | remove <address> | push]
                                                your own game servers for a game that understands such a list; the admin
                                                password is read from standard input and kept in the keychain
@@ -154,6 +156,8 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay install <id> --team <Team-ID>        bauen, installieren, Daten ergänzend kopieren, Zusatzinhalte freischalten
   avpplay stage <id>                           nur Daten und Zusatzinhalte ergänzend kopieren (ohne Build)
   avpplay renew [--dry-run] [--force <id>]     installierte Spiele neu signieren, deren Signatur bald abläuft (was der Hintergrunddienst tut)
+  avpplay saves [<id> …] [--saves <Ordner>]    Spielstände installierter Spiele von der Vision Pro auf den Mac holen (auf dem Gerät ändert sich nichts)
+  avpplay saves <id> --restore                 den neuesten Stand auf die Vision Pro zurückspielen; ersetzt, was dort liegt (das wird vorher geholt)
   avpplay servers <id> [add <Adresse> [--name <Name>] [--admin-stdin] | remove <Adresse> | push]
                                                eigene Spielserver für ein Spiel, das so eine Liste versteht; das Admin-Passwort
                                                wird von der Standardeingabe gelesen und im Schlüsselbund abgelegt
@@ -164,6 +168,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
              --icon <Bilddatei>      eigenes App-Icon hinterlegen (hat Vorrang vor allem anderen)
              --no-store-art          kein Titelbild von der Store-Seite holen (dann Icon aus dem APK)
              --replace-running       auch installieren, wenn das Spiel gerade läuft (es wird dabei beendet)
+             --restore-saves         nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat
              --addons-only           job start: nur gekaufte Zusatzinhalte eines installierten Spiels abgleichen (kein Bau, kein --team)
              --download-only         job start: nur die Dateien laden (braucht weder Xcode noch Toolchain, --team oder Gerät)
              --build-only            job start: prüfen, laden, bauen und die App installieren, aber die Spieldaten noch nicht kopieren
@@ -179,7 +184,7 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 }
 
 let valued: Set<String> = ["account", "steam-account", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
-                           "team", "device", "bundle-id", "toolchain", "icon", "tool", "jobs", "toolchains"]
+                           "team", "device", "bundle-id", "toolchain", "icon", "tool", "jobs", "toolchains", "saves"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
 
@@ -216,8 +221,26 @@ func installRequest(_ o: Options) -> InstallRequest {
     request.customIcon = o.value("icon").map { URL(fileURLWithPath: $0).standardizedFileURL.path }
     request.storeArt = !o.flags.contains("no-store-art")
     if o.flags.contains("replace-running") { request.replaceRunning = true }
+    if o.flags.contains("restore-saves") { request.restoreSaves = true }
     request.interval = Double(o.value("interval") ?? "") ?? 5
     return request
+}
+
+/// Sagt beim Kopieren aufs Gerät, wie weit es ist – höchstens einmal je Sekunde, und nur, wenn sich etwas getan hat.
+final class CopyProgressPrinter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = Date.distantPast
+    private var shown: Int64 = -1
+    private var via: Device.Transport?
+
+    func show(_ p: InstallProgress) {
+        lock.lock(); defer { lock.unlock() }
+        if let v = p.via { via = v }
+        guard p.total > 0, p.done != shown, p.done == p.total || Date().timeIntervalSince(last) >= 1 else { return }
+        (last, shown) = (Date(), p.done)
+        let over = via.map { L(" over \($0.text)", " über \($0.text)") } ?? ""
+        print(L("    \(p.done / 1_000_000) of \(p.total / 1_000_000) MB copied\(over)", "    \(p.done / 1_000_000) von \(p.total / 1_000_000) MB kopiert\(over)"))
+    }
 }
 
 func describe(_ j: Job) -> String {
@@ -582,7 +605,8 @@ case "devices":
             print(L("\(d.name)  visionOS \(d.osVersion)  \(d.udid)  \(d.paired ? "paired" : "not paired"), "
                     + "\(d.reachable ? "reachable" : "not reachable"), Developer Mode \(d.developerMode ? "on" : "off")",
                     "\(d.name)  visionOS \(d.osVersion)  \(d.udid)  \(d.paired ? "gekoppelt" : "nicht gekoppelt"), "
-                    + "\(d.reachable ? "erreichbar" : "nicht erreichbar"), Entwicklermodus \(d.developerMode ? "an" : "aus")"))
+                    + "\(d.reachable ? "erreichbar" : "nicht erreichbar"), Entwicklermodus \(d.developerMode ? "an" : "aus")")
+                  + (d.transport.map { L(", connected over \($0.text)", ", verbunden über \($0.text)") } ?? ""))
         }
     } catch { fail("\(error)") }
 
@@ -592,7 +616,8 @@ case "install", "stage":
     if command == "install", o.value("team") == nil {
         fail(L("For 'install', give the Apple Team ID with --team.", "Für 'install' die Apple-Team-ID mit --team angeben."))
     }
-    let installer = Installer(recipe: r, request: installRequest(o), store: contentStore(o)) { print($0) }
+    let copying = CopyProgressPrinter()
+    let installer = Installer(recipe: r, request: installRequest(o), store: contentStore(o), progress: { copying.show($0) }) { print($0) }
     do {
         for step in (command == "install" ? [.account, .build, .stage, .unlock] : [.account, .stage, .unlock]) as [InstallStep] {
             try await installer.perform(step)
@@ -661,6 +686,43 @@ case "renew":
         ? L("Nothing is due (\(report.known) installation(s) with a known date).", "Nichts fällig (\(report.known) Installation(en) mit bekanntem Datum).")
         : L("\(report.outcomes.count) due: \(report.outcomes.filter { $0.result == .renewed }.count) renewed, \(report.outcomes.filter { $0.result == .failed }.count) failed, the rest not tried.",
             "\(report.outcomes.count) fällig: \(report.outcomes.filter { $0.result == .renewed }.count) erneuert, \(report.outcomes.filter { $0.result == .failed }.count) gescheitert, der Rest nicht versucht."))
+
+case "saves":
+    // Holt Spielstände – aller installierten Spiele oder der genannten. Was die Oberfläche von selbst tut.
+    let known = Renewal.recipes(bundled: recipesDirectory(o), drafts: DataLocation.base.appendingPathComponent("drafts", isDirectory: true))
+    let named = Set(o.positional.dropFirst())
+    let wanted = named.isEmpty ? known : known.filter { named.contains($0.id) }
+    guard !wanted.isEmpty else { fail(L("No recipe by that name.", "Kein Rezept mit diesem Namen.")) }
+    let saves = o.value("saves").map { SaveStore(root: URL(fileURLWithPath: $0)) } ?? SaveStore(root: SaveStore.root(forStore: contentStore(o).root))
+    if o.flags.contains("restore") {
+        // Den neuesten Stand eines Spiels aufs Gerät zurückspielen und ersetzen, was dort liegt. Was dort liegt, wird
+        // vorher geholt; läuft das Spiel, passiert nichts.
+        guard wanted.count == 1, !named.isEmpty, let r = wanted.first else { fail(L("--restore takes exactly one game.", "--restore braucht genau ein Spiel.")) }
+        do {
+            let control = DeviceControl()
+            let device = try control.pick(udid: o.value("device"))
+            let apps = try control.apps(device: device)
+            guard let bundle = o.value("bundle-id") ?? SaveSync.installedBundle(recipe: r, store: contentStore(o), prefix: nil, apps: apps),
+                  let app = apps.first(where: { $0.bundleIdentifier == bundle }) else { fail("\(InstallError.appNotInstalled(r.title))") }
+            guard !DeviceControl.isRunning(app, executables: try control.runningExecutables(device: device)) else { fail("\(InstallError.appRunning(r.title))") }
+            guard let snapshot = saves.snapshots(for: r).first else { fail("\(SaveError.nothingSaved(r.title))") }
+            let sync = SaveSync(saves: saves, store: contentStore(o))
+            _ = try sync.fetch(recipe: r, device: device, bundle: bundle)
+            let n = try sync.restore(snapshot, recipe: r, device: device, bundle: bundle, mode: .overwrite)
+            print(L("\(r.title): \(n) file(s) from \(snapshot.id) put back on the Vision Pro (\(bundle)).",
+                    "\(r.title): \(n) Datei(en) vom \(snapshot.id) auf die Vision Pro zurückgespielt (\(bundle))."))
+        } catch { fail("\(error)") }
+        exit(0)
+    }
+    guard let results = SaveRound.run(recipes: wanted, store: contentStore(o), saves: saves, preferredDevice: o.value("device"),
+                                      prefix: o.value("bundle-id").map { ($0 as NSString).deletingPathExtension }) else {
+        fail("\(DeviceError.noDevice)")
+    }
+    for r in results {
+        let where_ = r.snapshot.map { "  " + saves.directory(for: wanted.first { $0.id == r.recipe }!).appendingPathComponent($0.id).path } ?? ""
+        print("\(r.title): \(r.detail)\(r.kind == .saved ? where_ : "")")
+    }
+    if results.isEmpty { print(L("None of these games is on the Vision Pro.", "Keines dieser Spiele ist auf der Vision Pro.")) }
 
 case "toolchain":
     guard o.positional.count >= 2 else {

@@ -460,6 +460,17 @@ enum RenewalAgent {
             print("\(stamp()) checked: \(report.known) known, \(report.outcomes.count) due, "
                   + "\(report.outcomes.filter { $0.result == .renewed }.count) renewed")
             await notify(report)
+            // Bei der Gelegenheit die Spielstände, sofern nicht abgestellt und gerade niemand baut oder kopiert.
+            if defaults.object(forKey: "syncSaves") as? Bool ?? true, !ProcessLock.isHeld(ProcessLock.installURL),
+               StoreLocation.isAvailable(paths.store.root) {
+                let custom = defaults.string(forKey: "bundlePrefix").flatMap { $0.isEmpty ? nil : $0 }
+                let all = Renewal.recipes(bundled: paths.recipes, drafts: drafts).filter { $0.id.hasPrefix("store-") || $0.files.contains { $0.role == "apk" } }
+                if let results = SaveRound.run(recipes: all, store: paths.store, preferredDevice: wanted, prefix: custom) {
+                    for r in results where r.kind == .saved || r.kind == .failed { print("\(stamp()) saved games – \(r.title): \(Redaction.redact(r.detail))") }
+                    print("\(stamp()) saved games: \(results.count) installed, \(results.filter { $0.kind == .saved }.count) with something new")
+                    defaults.set(Date().timeIntervalSince1970, forKey: "lastSaveRound")
+                }
+            }
             done.signal()
         }
         done.wait()

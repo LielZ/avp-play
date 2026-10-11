@@ -381,7 +381,7 @@ final class StageTests: XCTestCase {
     func testDeviceJsonParsing() throws {
         let devices = #"{"result":{"devices":[{"hardwareProperties":{"platform":"visionOS","reality":"physical","udid":"U1"},"connectionProperties":{"tunnelState":"connected","pairingState":"paired"},"deviceProperties":{"name":"VP","osVersionNumber":"27.2","developerModeStatus":"enabled"}},{"hardwareProperties":{"platform":"visionOS","reality":"simulated","udid":"S1"}},{"hardwareProperties":{"platform":"iOS","reality":"physical","udid":"I1"}}]}}"#
         XCTAssertEqual(try DeviceControl.parseDevices(Data(devices.utf8)),
-                       [Device(udid: "U1", name: "VP", osVersion: "27.2", reachable: true, paired: true, developerMode: true)])
+                       [Device(udid: "U1", name: "VP", osVersion: "27.2", reachable: true, paired: true, developerMode: true, connected: true)])
         let files = #"{"result":{"files":[{"metadata":{"size":8964688},"name":"a","relativePath":"a","resources":{"isDirectory":false}},{"metadata":{"size":96},"relativePath":"dir","resources":{"isDirectory":true}}]}}"#
         XCTAssertEqual(try DeviceControl.parseFiles(Data(files.utf8)),
                        [RemoteFile(relativePath: "a", size: 8964688, isDirectory: false), RemoteFile(relativePath: "dir", size: 96, isDirectory: true)])
@@ -1579,6 +1579,90 @@ final class ToolchainPackageTests: XCTestCase {
         XCTAssertEqual(packager.installed().map { $0.manifest?.version }, [4, 2])
         XCTAssertEqual(try packager.prune(keep: 0).count, 1, "das neueste bleibt immer")
         XCTAssertEqual(packager.installed().map { $0.manifest?.version }, [4])
+    }
+
+    func testAutomaticPruneWaitsForARunningBuildAndClearsUnpackingLeftovers() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("qi-autoprune-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        let packager = ToolchainPackager(root: root.appendingPathComponent("toolchains"))
+        let lock = root.appendingPathComponent(".install.lock")
+        func plant(_ version: Int, _ commit: String) throws {
+            let m = ToolchainManifest(format: 1, version: version, commit: commit, ancestors: [commit], created: Date())
+            let dir = packager.directory(for: m)
+            try fm.createDirectory(at: dir.appendingPathComponent("visionos"), withIntermediateDirectories: true)
+            try "#!/bin/sh\n".write(to: dir.appendingPathComponent("visionos/run.sh"), atomically: true, encoding: .utf8)
+            try ToolchainPackager.encoder.encode(m).write(to: dir.appendingPathComponent("toolchain.json"))
+        }
+        try plant(1, "aaaaaaa"); try plant(2, "bbbbbbb"); try plant(3, "ccccccc")
+        let stale = packager.root.appendingPathComponent(".1-aaaaaaa.new"), fresh = packager.root.appendingPathComponent(".4-ddddddd.new")
+        try fm.createDirectory(at: stale, withIntermediateDirectories: true)
+        try fm.createDirectory(at: fresh, withIntermediateDirectories: true)
+        let now = Date().addingTimeInterval(2 * 3600)
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-60)], ofItemAtPath: fresh.path)
+
+        // Solange ein Prozess baut oder kopiert, bleibt alles stehen.
+        let building = try XCTUnwrap(ProcessLock.acquire(lock))
+        XCTAssertNil(packager.pruneWhenIdle(lock: lock, now: now))
+        XCTAssertEqual(packager.installed().count, 3)
+        XCTAssertTrue(fm.fileExists(atPath: stale.path))
+        building.release()
+
+        // Danach: die neueste bleibt, die eines wartenden Auftrags auch; der alte Rest vom Auspacken fällt weg,
+        // einer, an dem vielleicht gerade ausgepackt wird, nicht.
+        XCTAssertEqual(packager.pruneWhenIdle(protecting: ["bbbbbbb"], lock: lock, now: now)?.toolchains.map(\.version), [1])
+        XCTAssertEqual(packager.installed().map { $0.manifest?.version }, [3, 2])
+        XCTAssertFalse(fm.fileExists(atPath: stale.path))
+        XCTAssertTrue(fm.fileExists(atPath: fresh.path))
+        XCTAssertFalse(ProcessLock.isHeld(lock), "die Sperre ist wieder frei")
+    }
+
+    func testBuildLeftoversGoAfterAWeekAndNothingElseDoes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("qi-leftovers-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        let now = Date(), day: TimeInterval = 24 * 3600
+        func put(_ path: String, age: TimeInterval = 0) throws {
+            let url = root.appendingPathComponent(path)
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "x".write(to: url, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.modificationDate: now.addingTimeInterval(-age)], ofItemAtPath: url.path)
+        }
+        func built(_ target: String, apk: String? = nil, daysAgo: Double) throws {
+            try put("visionos/build/dd-device-\(target)/info.plist", age: daysAgo * day)
+            try put("visionos/build/dd-device-\(target)/Build/Products/a.o")
+            try put("visionos/build/guest/\(target)/lib.dylib")
+            try put("visionos/Frameworks/\(target)/lib.dylib")
+            try put("\(target)/.qi-prepared", age: daysAgo * day)
+            try put("\(target)/assets/data.bin")
+            try put(apk ?? "\(target).apk")
+        }
+        try built("old", daysAgo: 9)
+        try built("oddname", apk: "odd-1.0.apk", daysAgo: 30)
+        try built("fresh", daysAgo: 2)
+        try built("waiting", daysAgo: 20)
+        // Die Toolchain selbst, und ein Target, das heißt wie einer ihrer Ordner, aber nie von der App vorbereitet wurde.
+        try put("runtime/kl_jni.c"); try put("visionos/run.sh"); try put("toolchain.json")
+        try put("visionos/build/dd-device-runtime/info.plist", age: 40 * day)
+        try put("visionos/Frameworks/MoltenVK.xcframework/Info.plist", age: 400 * day)
+        // Ohne datierbaren Bau bleibt ein Baum stehen.
+        try put("undated/assets/data.bin", age: 90 * day)
+
+        let cleared = ToolchainPackager.removeBuildLeftovers(in: root, olderThan: 7 * day, apkNames: ["oddname": "odd-1.0.apk"],
+                                                             skipping: ["waiting"], now: now)
+        XCTAssertEqual(cleared, ["oddname", "old", "runtime"])
+        func exists(_ path: String) -> Bool { fm.fileExists(atPath: root.appendingPathComponent(path).path) }
+        for gone in ["old", "old.apk", "visionos/build/dd-device-old", "visionos/build/guest/old", "visionos/Frameworks/old",
+                     "oddname", "odd-1.0.apk", "visionos/build/dd-device-oddname", "visionos/build/dd-device-runtime"] {
+            XCTAssertFalse(exists(gone), gone)
+        }
+        for kept in ["fresh/assets/data.bin", "fresh.apk", "visionos/build/dd-device-fresh/info.plist", "visionos/Frameworks/fresh/lib.dylib",
+                     "waiting/assets/data.bin", "waiting.apk", "visionos/build/dd-device-waiting/info.plist",
+                     "runtime/kl_jni.c", "visionos/run.sh", "toolchain.json", "visionos/Frameworks/MoltenVK.xcframework/Info.plist",
+                     "undated/assets/data.bin"] {
+            XCTAssertTrue(exists(kept), kept)
+        }
+        XCTAssertEqual(ToolchainPackager.removeBuildLeftovers(in: root, olderThan: 7 * day, now: now), ["waiting"], "sobald der Auftrag durch ist")
     }
 
     func testTamperedArchiveAndDirtyCheckoutAreRefused() throws {

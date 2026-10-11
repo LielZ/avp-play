@@ -39,6 +39,8 @@ struct Game: Identifiable {
         case .notInstalled, .unknown: return false
         }
     }
+    /// Liegt alles, woraus das Spiel gebaut wird, vollständig auf diesem Mac?
+    var downloaded: Bool { prepared && status.filesRequired + status.treesRequired > 0 && status.stockComplete }
 }
 
 /// Vom Projekt geprüft, von Nutzern bestätigt, noch offen, oder von Nutzern als nicht lauffähig gemeldet.
@@ -55,6 +57,9 @@ struct GameOptions: Codable, Equatable {
     var optionalNames: [String] = []
     /// Gekaufte Zusatzinhalte laden und freischalten.
     var addons = true
+    /// Beim Installieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat.
+    /// Wählbar und nicht fest, weil ältere gespeicherte Angaben den Eintrag nicht kennen; ohne Angabe: ja.
+    var restoreSaves: Bool?
 }
 
 /// Die in der Übersicht angehakten Spiele – ein eigener, kleiner Zustand (siehe `AppModel.picked`).
@@ -175,6 +180,8 @@ final class AppModel: ObservableObject {
     @AppStorage("usageCounts") var usageCounts = true
     /// Titelbilder für Spiele, die noch nicht geladen sind, von deren öffentlicher Store-Seite holen.
     @AppStorage("storePictures") var storePictures = true
+    /// Ältere Toolchains von selbst entfernen, sobald eine neuere installiert ist und nichts mehr mit ihnen baut.
+    @AppStorage("autoRemoveOldToolchains") var autoRemoveOldToolchains = true
     /// Besorgt diese Bilder: zwei Abrufe zugleich, mit Zwischenspeicher.
     let covers = CoverLoader()
     @AppStorage("filterFavourites") var filterFavourites = false
@@ -195,6 +202,8 @@ final class AppModel: ObservableObject {
     /// Die Filter der Übersicht; mehrere zugleich engen weiter ein.
     @AppStorage("filterVerified") var filterVerified = false
     @AppStorage("filterInstalled") var filterInstalled = false
+    /// Nur Spiele, deren Dateien vollständig auf dem Mac liegen, die aber nicht auf der Vision Pro sind.
+    @AppStorage("filterDownloaded") var filterDownloaded = false
     private var routed = false
     @AppStorage("teamId") var teamId = ""
     /// Die Sprache, in der das Programm gerade spricht. Ansichten hängen daran und bauen sich beim Wechsel neu.
@@ -234,6 +243,18 @@ final class AppModel: ObservableObject {
     @Published var renewalReport: RenewalReport? = RenewalReport.load()
     @Published var renewalNote: String?
     @Published var renewing = false
+    /// Spielstände: ob sie von selbst von der Vision Pro geholt werden, wann zuletzt alle Spiele dran waren, der
+    /// neueste Stand je Spiel (nach Kennung des Rezepts), für welche Spiele gerade geholt oder zurückgespielt wird
+    /// und was dabei zuletzt herauskam.
+    @AppStorage("syncSaves") var syncSaves = true
+    @AppStorage("lastSaveRound") var lastSaveRound: Double = 0
+    @Published var saveSnapshots: [String: SaveSnapshot] = [:]
+    @Published var savesBusy: Set<String> = []
+    @Published var savesNote: [String: String] = [:]
+    /// Welche Spiele bei der letzten Nachfrage auf dem Headset liefen – endet eines, werden seine Spielstände geholt.
+    var runningGames: Set<String> = []
+    var saveWatch: Task<Void, Never>?
+    var saveTicks = 0
 
     init() {
         applyLanguage()
@@ -259,6 +280,7 @@ final class AppModel: ObservableObject {
             // „Geprüft“ und „Von Nutzern bestätigt“ ergänzen einander; alle anderen Filter engen weiter ein.
             ((!filterVerified && !filterCommunity) || (filterVerified && game.trust == .verified) || (filterCommunity && game.trust == .community))
                 && (!filterInstalled || game.installed)
+                && (!filterDownloaded || (game.downloaded && !game.installed))
                 && (!filterFavourites || isFavourite(game))
                 && (words.isEmpty || game.recipe.title.lowercased().contains(words) || game.recipe.package.lowercased().contains(words))
         }.sorted { a, b in
@@ -494,6 +516,7 @@ final class AppModel: ObservableObject {
         // Genau ein bezahltes Team: das ist es. Sonst entscheidet der Nutzer.
         let paid = s.teamCandidates.filter { !$0.free }
         if teamId.isEmpty, paid.count == 1 { teamId = paid[0].id }
+        saveSnapshots = s.saves
         reloadJobs()
         ownership = OwnershipCache(store: paths.store).load()
         checkOwnership()
@@ -656,7 +679,10 @@ final class AppModel: ObservableObject {
         let paths = paths
         Task.detached {
             guard let bundled = Paths.manifest(beside: archive) else { return }
-            if let installed = paths.packager.installed().first?.manifest, installed.version >= bundled.version { return }
+            if let installed = paths.packager.installed().first?.manifest, installed.version >= bundled.version {
+                await MainActor.run { self.removeOlderToolchainsAutomatically() }
+                return
+            }
             let text: String
             do {
                 let t = try paths.packager.install(archive: archive)
@@ -668,6 +694,50 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.notice = text
                 self.refresh()
+                self.removeOlderToolchainsAutomatically()
+            }
+        }
+    }
+
+    /// Räumt ältere Toolchains weg, ohne dass jemand darum bitten muss: nach dem Start, nach dem Installieren einer
+    /// neueren und nach jedem Auftrag. In der neuesten fällt dabei weg, was Spiele beim Bauen hinterlassen haben,
+    /// deren letzter Bau über eine Woche her ist. Eine Toolchain wächst mit jedem gebauten Spiel um Gigabytes, und gebaut wird
+    /// immer mit der neuesten – die älteren braucht nur noch ein Auftrag, der gerade wartet oder läuft. Baut oder
+    /// kopiert gerade irgendein AVP-Play-Prozess (auch der Hintergrunddienst), passiert nichts; der nächste Anlass
+    /// holt es nach.
+    nonisolated static let buildLeftoverAge: TimeInterval = 7 * 24 * 3600
+
+    func removeOlderToolchainsAutomatically() {
+        guard autoRemoveOldToolchains, runningJob == nil else { return }
+        let paths = paths
+        let active = jobs.filter { $0.state == .waiting || $0.state == .running }
+        let open = Set(active.map(\.toolchainCommit)), busy = Set(active.map(\.recipe.toolchain.target))
+        // Die Kopie des APK heißt nicht bei jedem Spiel wie sein Target; den Namen kennt das Rezept.
+        var apkNames: [String: String] = [:]
+        for recipe in games.map(\.recipe) + jobs.map(\.recipe) {
+            if let name = recipe.files.first(where: { $0.role == "apk" })?.localName { apkNames[recipe.toolchain.target] = name }
+        }
+        Task.detached(priority: .utility) {
+            guard let cleared = paths.packager.pruneWhenIdle(protecting: open, leftoversOlderThan: AppModel.buildLeftoverAge,
+                                                             apkNames: apkNames, busyTargets: busy),
+                  !cleared.isEmpty else { return }
+            var parts: [String] = []
+            if !cleared.toolchains.isEmpty {
+                let names = cleared.toolchains.map { String($0.version) }.joined(separator: ", ")
+                parts.append(cleared.toolchains.count == 1
+                    ? L("an older toolchain (version \(names))", "eine ältere Toolchain (Version \(names))")
+                    : L("\(cleared.toolchains.count) older toolchains (versions \(names))", "\(cleared.toolchains.count) ältere Toolchains (Versionen \(names))"))
+            }
+            if !cleared.games.isEmpty {
+                parts.append(cleared.games.count == 1
+                    ? L("the build leftovers of one game built more than a week ago", "die Bau-Reste eines Spiels, das vor über einer Woche gebaut wurde")
+                    : L("the build leftovers of \(cleared.games.count) games built more than a week ago", "die Bau-Reste von \(cleared.games.count) Spielen, die vor über einer Woche gebaut wurden"))
+            }
+            let what = parts.joined(separator: L(" and ", " und "))
+            await MainActor.run {
+                self.notice = L("Tidied up: \(what) removed from this Mac. Nothing on the Vision Pro or among the downloads was touched.",
+                                "Aufgeräumt: \(what) von diesem Mac entfernt. Vision Pro und Downloads sind unberührt.")
+                self.scanStorage()
             }
         }
     }
@@ -801,6 +871,8 @@ final class AppModel: ObservableObject {
         request.locales = chosen.locales
         request.optionalNames = chosen.optionalNames
         request.addons = addons ?? chosen.addons
+        // Nur eine Installation spielt Spielstände zurück; ein Abgleich von Inhalten rührt sie nicht an.
+        if steps.contains(.build) { request.restoreSaves = chosen.restoreSaves ?? true }
         // Ein eigenes Präfix oder das eines kostenlosen Teams: dann steht die Kennung im Auftrag.
         let prefix = bundlePrefix
         if prefix != Toolchain.defaultBundlePrefix() { request.bundleId = "\(prefix).\(game.recipe.toolchain.target)" }
@@ -918,7 +990,12 @@ final class AppModel: ObservableObject {
         }
         runningTask = Task.detached {
             let installer = Installer(recipe: job.recipe, request: job.request, store: paths.store,
-                                      progress: { p in Task { @MainActor in self.copyProgress[id] = p } },
+                                      progress: { p in Task { @MainActor in
+                                          // Die Verbindungsart kommt einmal am Anfang; die Meldungen danach tragen sie nicht.
+                                          var p = p
+                                          if p.via == nil { p.via = self.copyProgress[id]?.via }
+                                          self.copyProgress[id] = p
+                                      } },
                                       report: { feed.yield("    " + $0) })
             let now = (try? Toolchain(root: URL(fileURLWithPath: job.request.toolchain)).commit()) ?? "unbekannt"
             do {
@@ -957,6 +1034,7 @@ final class AppModel: ObservableObject {
         reportUsage()
         refresh()
         pump()
+        removeOlderToolchainsAutomatically()
         if runningJob == nil, let token = awake {
             ProcessInfo.processInfo.endActivity(token)
             awake = nil
@@ -997,6 +1075,8 @@ struct Paths: Sendable {
     let store: ContentStore
     let jobs: JobStore
     let packager: ToolchainPackager
+    /// Die Spielstände: neben dem Ordner für Downloads, wenn einer gewählt ist, sonst bei den Daten des Programms.
+    var saves: SaveStore { SaveStore(root: SaveStore.root(forStore: store.root)) }
 
     init() {
         let env = ProcessInfo.processInfo.environment

@@ -24,7 +24,9 @@ struct SetupView: View {
                 }
 
                 CheckCard(title: "Vision Pro", state: model.device == nil ? (model.devices.count > 1 ? .warning : .missing) : (model.deviceProblem == nil ? .ok : .warning),
-                          detail: model.device.map { d in model.deviceProblem ?? L("\(d.name) with visionOS \(d.osVersion) is reachable.", "\(d.name) mit visionOS \(d.osVersion) ist erreichbar.") }
+                          detail: model.device.map { d in model.deviceProblem ?? L("\(d.name) with visionOS \(d.osVersion) is reachable", "\(d.name) mit visionOS \(d.osVersion) ist erreichbar")
+                              + (d.transport.map { L(" over \($0.text).", " über \($0.text).") } ?? ".")
+                              + (d.transport == .wifi ? L(" With a USB cable on the Developer Strap, copying games is much faster.", " Mit einem USB-Kabel am Developer Strap geht das Kopieren von Spielen deutlich schneller.") : "") }
                               ?? model.deviceProblem ?? L("Searching …", "Wird gesucht …")) {
                     if model.devices.count > 1 {
                         Picker(L("Use this one", "Dieses benutzen"), selection: Binding(

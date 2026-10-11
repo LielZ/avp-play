@@ -188,11 +188,24 @@ public struct CatalogClient: Sendable {
         return try await fetchPage(items)
     }
 
-    /// Genau diese Spiele (höchstens 100) – für das, was schon auf dem Mac liegt oder gemerkt ist.
+    /// So viele Kennungen nimmt der Dienst in einer Anfrage an.
+    public static let idsPerRequest = 100
+
+    /// Teilt Kennungen in Anfragen auf, die der Dienst annimmt; was keine Kennung ist, fällt weg.
+    static func batches(of appIds: [String], size: Int = idsPerRequest) -> [[String]] {
+        let ids = appIds.filter(CatalogGame.isIdentifier)
+        return stride(from: 0, to: ids.count, by: max(1, size)).map { Array(ids[$0..<min($0 + size, ids.count)]) }
+    }
+
+    /// Genau diese Spiele – für das, was schon auf dem Mac liegt oder gemerkt ist. Der Dienst nimmt höchstens 100
+    /// Kennungen auf einmal; bei mehr wird in mehreren Anfragen gefragt. Bis 1.1.0 fiel alles nach den ersten 100
+    /// weg: Wer viele Favoriten hatte, sah unter dem Filter „Favoriten“ nur einen Teil davon.
     public func games(appIds: [String]) async throws -> [CatalogGame] {
-        let ids = appIds.filter(CatalogGame.isIdentifier).prefix(100)
-        guard !ids.isEmpty else { return [] }
-        return try await fetchPage([URLQueryItem(name: "ids", value: ids.joined(separator: ","))]).games
+        var found: [CatalogGame] = []
+        for ids in CatalogClient.batches(of: appIds) {
+            found += try await fetchPage([URLQueryItem(name: "ids", value: ids.joined(separator: ","))]).games
+        }
+        return found
     }
 
     private func fetchPage(_ items: [URLQueryItem]) async throws -> Page {

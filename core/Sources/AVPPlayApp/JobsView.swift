@@ -15,6 +15,11 @@ struct JobsView: View {
             HSplitView {
                 List(model.jobs, selection: $model.selectedJob) { job in
                     JobRow(job: job).tag(job.id)
+                        .contextMenu {
+                            let phase = model.phase(of: job)
+                            Button(L("Take Off This List", "Aus dieser Liste nehmen")) { model.remove([job]) }
+                                .disabled(phase == .running || phase == .queued)
+                        }
                 }
                 .frame(minWidth: 250, idealWidth: 290, maxWidth: 360)
                 Group {
@@ -27,6 +32,7 @@ struct JobsView: View {
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
             .navigationTitle(L("Jobs", "Aufträge"))
+            .toolbar { ToolbarItem { ClearJobsMenu() } }
         }
     }
 }
@@ -186,9 +192,10 @@ struct JobDetail: View {
                 }
             }
             if phase == .running, job.current == .stage, let progress = model.copyProgress[job.id], progress.total > 0 {
-                // Das Gerät meldet nur ganze Dateien; bei wenigen großen Dateien steht der Balken dazwischen still.
+                // Bei einer großen Datei wird das Gerät währenddessen gefragt, wie viel von ihr schon dort liegt.
                 ProgressLine(done: progress.done, total: progress.total,
-                             verb: L("copied to the Vision Pro", "auf die Vision Pro kopiert")).id("stage-\(job.id)")
+                             verb: progress.via.map { L("copied to the Vision Pro over \($0.text)", "über \($0.text) auf die Vision Pro kopiert") }
+                                 ?? L("copied to the Vision Pro", "auf die Vision Pro kopiert")).id("stage-\(job.id)")
             }
 
             HStack {

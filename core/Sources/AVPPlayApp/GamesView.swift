@@ -17,8 +17,18 @@ struct GamesView: View {
                         Toggle(L("Verified", "Geprüft"), isOn: $model.filterVerified)
                         if model.onlineCatalog { Toggle(L("Community Verified", "Von Nutzern bestätigt"), isOn: $model.filterCommunity) }
                         Toggle(L("Installed", "Installiert"), isOn: $model.filterInstalled)
+                        Toggle(L("Downloaded, Not Installed", "Geladen, nicht installiert"), isOn: $model.filterDownloaded)
+                            .help(L("Games whose files are completely on this Mac but which are not on the Vision Pro. While the Vision Pro is not reachable, every downloaded game is shown.",
+                                    "Spiele, deren Dateien vollständig auf diesem Mac liegen, die aber nicht auf der Vision Pro sind. Solange die Vision Pro nicht erreichbar ist, stehen hier alle geladenen Spiele."))
                         Toggle(L("Favourites", "Favoriten"), isOn: $model.filterFavourites)
                         Spacer()
+                        Button(L("Export List …", "Liste exportieren …")) { model.exportGameList(shownOnly: true) }
+                            .controlSize(.small).disabled(!model.canExportShown)
+                            .help(model.canExportShown
+                                  ? L("Writes the games that match the filters and the search into a text file to pass on – all of them, also favourites the overview has not loaded yet. Only a list: no game files, nothing about your account or device.",
+                                      "Schreibt die Spiele, die zu den Filtern und der Suche passen, in eine Textdatei zum Weitergeben – alle, auch Favoriten, die die Übersicht noch nicht geladen hat. Nur eine Liste: keine Spieldateien, nichts über dein Konto oder Gerät.")
+                                  : L("Set “Installed”, “Downloaded, Not Installed” or “Favourites” first: only those are lists this Mac knows completely.",
+                                      "Setze zuerst „Installiert“, „Geladen, nicht installiert“ oder „Favoriten“: Nur das sind Listen, die dieser Mac vollständig kennt."))
                         if model.searching {
                             ProgressView().controlSize(.small)
                             Text(L("Searching the catalogue …", "Katalog wird durchsucht …")).font(.callout).foregroundStyle(.secondary)
@@ -73,6 +83,8 @@ struct GamesView: View {
                 try? await Task.sleep(for: .milliseconds(800))
                 if !Task.isCancelled { model.searchCatalog() }
             }
+            // Unter dem Filter „Favoriten“ sollen alle stehen, auch die, bis zu denen der Katalog noch nicht geladen ist.
+            .task(id: model.filterFavourites) { if model.filterFavourites { await model.loadAllFavourites() } }
             .navigationDestination(for: String.self) { id in
                 if let game = model.allGames.first(where: { $0.id == id }) { GameDetail(game: game) }
             }
@@ -413,6 +425,8 @@ struct GameDetail: View {
                                 Text(L("Space used", "Belegter Platz")).foregroundStyle(.secondary).frame(width: 130, alignment: .leading)
                                 Text(Installer.gigabytes(game.storeBytes))
                                 Spacer()
+                                Button(L("Show in Finder", "Im Finder zeigen")) { model.showFiles(game) }
+                                    .controlSize(.small)
                                 Button(L("Remove from This Mac …", "Von diesem Mac entfernen …")) { confirmRemove = true }
                                     .controlSize(.small)
                                     .disabled(model.isBusy(game.id))
@@ -433,6 +447,8 @@ struct GameDetail: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
+
+                if model.hasSaves(game), game.installed || model.saveSnapshots[game.id] != nil { SavesBox(game: game) }
 
                 if !languageFiles.isEmpty || game.recipe.addons != nil || !extras.isEmpty { optionalContent }
 

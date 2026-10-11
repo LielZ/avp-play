@@ -20,6 +20,8 @@ enum Probe {
         var freeBytes: Int64?
         var apps: [InstalledApp]?
         var toolchainRevision: Int?
+        /// Der neueste Stand der Spielstände je Spiel, soweit einer auf dem Mac liegt.
+        var saves: [String: SaveSnapshot] = [:]
     }
 
     /// Ein Entwicklerteam, wie Xcode es kennt.
@@ -78,6 +80,13 @@ enum Probe {
                     .filter { r in r.id.hasPrefix("store-") && !(r.store.appId.map(shipped.contains) ?? true) }
                 s.games = (bundled.map { game($0, draft: false) } + drafts.map { game($0, draft: true) })
                     .sorted { $0.recipe.title.localizedCaseInsensitiveCompare($1.recipe.title) == .orderedAscending }
+                let saved = paths.saves
+                // Stände aus der Zeit, als sie immer bei den Daten des Programms lagen, ziehen neben den gewählten Ordner.
+                if StoreLocation.isAvailable(paths.store.root) {
+                    SaveStore.move(from: SaveStore.root(forStore: StoreLocation.standard()), to: saved.root)
+                }
+                for g in s.games { if let newest = saved.snapshots(for: g.recipe).first { s.saves[g.id] = newest } }
+                StoreIndex.write(root: paths.store.root, entries: indexEntries(games: s.games, root: paths.store.root))
             } catch {
                 s.loadProblem = L("The list of games could not be read: \(error)", "Die Spieleliste konnte nicht gelesen werden: \(error)")
             }
@@ -107,6 +116,24 @@ enum Probe {
         }
         s.freeBytes = StoreLocation.freeBytes(at: paths.store.root)
         return s
+    }
+
+    /// Was im Verzeichnis des Ordners für Downloads steht: jeder Ordner dort mit dem Spiel, zu dem er gehört.
+    static func indexEntries(games: [Game], root: URL) -> [StoreIndex.Entry] {
+        let fm = FileManager.default
+        let folders = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
+            .filter { !$0.lastPathComponent.hasPrefix(".") && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        return folders.map { url in
+            let name = url.lastPathComponent
+            if let game = games.first(where: { "\($0.recipe.id)-\($0.recipe.versionCode)" == name }) {
+                return StoreIndex.Entry(folder: name, title: game.recipe.title, detail: L("Version \(game.recipe.versionName)", "Version \(game.recipe.versionName)"), bytes: game.storeBytes)
+            }
+            let size = directorySize(url)
+            if let game = games.first(where: { name.hasPrefix($0.recipe.id + "-") }) {
+                return StoreIndex.Entry(folder: name, title: game.recipe.title, detail: L("an earlier version, no longer needed", "eine frühere Fassung, wird nicht mehr gebraucht"), bytes: size)
+            }
+            return StoreIndex.Entry(folder: name, title: name, detail: L("not used by any game in the list", "von keinem Spiel der Liste gebraucht"), bytes: size)
+        }
     }
 
     /// Belegter Platz eines Ordners; Verweise werden nicht verfolgt.
