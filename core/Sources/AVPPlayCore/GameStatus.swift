@@ -11,6 +11,9 @@ public struct GameStatus: Sendable, Equatable {
         case current(stamp: String)
         /// Von diesem Werkzeug gebaut, aber mit einer älteren Toolchain als der jetzt installierten.
         case olderToolchain(stamp: String)
+        /// Von diesem Werkzeug gebaut, aber aus einer älteren Fassung des SPIELS als der des Rezepts – das Rezept
+        /// wurde inzwischen für eine neuere geprüft, oder der Nutzer hat die neueste aus dem Store gewählt.
+        case olderGame(stamp: String)
         /// Installiert, aber eine andere Spielversion oder ohne Stempel dieses Werkzeugs.
         case unstamped(stamp: String)
     }
@@ -60,6 +63,11 @@ public struct GameStatus: Sendable, Equatable {
                    b.hasPrefix("\(r.versionCode).") {
                     let built = Int(b.split(separator: ".").last ?? "") ?? 0
                     onDevice = (toolchainVersion.map { built < $0 } ?? false) ? .olderToolchain(stamp: stamp) : .current(stamp: stamp)
+                } else if let b = app.bundleVersion, let installed = Int(b.split(separator: ".").first ?? ""),
+                          b.split(separator: ".").count == 2, installed > 0, installed < r.versionCode {
+                    // Der Stempel dieses Werkzeugs ist „<Versionscode>.<Toolchain>“: Eine kleinere erste Zahl ist
+                    // dasselbe Spiel in einer älteren Fassung.
+                    onDevice = .olderGame(stamp: stamp)
                 } else {
                     onDevice = .unstamped(stamp: stamp)
                 }

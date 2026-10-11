@@ -129,7 +129,7 @@ Selection: --locale de-DE      also include a language variant (can be repeated)
            --addons            also include purchased add-on content (asks for the list of purchases)
 General:   --account <name>    keychain entry (default: default)
            --store <folder>    where the files are kept   --recipes <folder>
-           --interval <s>      minimum pause between requests (default: 5)
+           --interval <s>      minimum pause between requests (default: none)
 """, """
 avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
 
@@ -179,7 +179,7 @@ Auswahl:   --locale de-DE      Sprachvariante dazunehmen (mehrfach möglich)
            --addons            gekaufte Zusatzinhalte dazunehmen (fragt die Kaufliste ab)
 Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
            --store <Ordner>    Ablage der Dateien      --recipes <Ordner>
-           --interval <s>      Mindestabstand zwischen Abrufen (Standard: 5)
+           --interval <s>      Mindestabstand zwischen Abrufen (Standard: keiner)
 """)
 }
 
@@ -222,7 +222,7 @@ func installRequest(_ o: Options) -> InstallRequest {
     request.storeArt = !o.flags.contains("no-store-art")
     if o.flags.contains("replace-running") { request.replaceRunning = true }
     if o.flags.contains("restore-saves") { request.restoreSaves = true }
-    request.interval = Double(o.value("interval") ?? "") ?? 5
+    request.interval = Double(o.value("interval") ?? "") ?? 0
     return request
 }
 
@@ -391,6 +391,37 @@ case "owns":
     }
     catch { fail("\(error)") }
 
+case "content-identity":
+    // Was die Auslieferung über eine Datei sagt, ohne sie zu laden (MetaClient.identity) – zum Nachsehen.
+    guard o.positional.count > 1, CatalogGame.isIdentifier(o.positional[1]) else { fail(L("A file ID is missing.", "Datei-Kennung fehlt.")) }
+    let (client, _) = await signedIn(o)
+    do {
+        let i = try await client.identity(id: o.positional[1])
+        print("length \(i.length.map(String.init) ?? "-"), md5 \(i.md5 ?? "-"), etag \(i.etag ?? "-")")
+        print("headers: \(i.headerNames.joined(separator: ", "))")
+        if let to = o.value("to") {
+            let out = try await client.download(id: o.positional[1], to: URL(fileURLWithPath: to))
+            print("downloaded \(out.bytesReceived) bytes")
+        }
+    } catch { fail("\(error)") }
+
+case "store-version":
+    // Welche Fassung der Store für ein Spiel des Kontos gerade führt (MetaClient.latestBuild).
+    let r = recipe(o)
+    guard let app = r.store.appId else { fail("\(MetaError.missingAppId)") }
+    let (client, user) = await signedIn(o)
+    do {
+        guard try await client.ownsApp(appId: app, userId: user) else {
+            fail(L("\(r.title): not owned – nothing is asked.", "\(r.title): nicht im Besitz – es wird nichts gefragt."))
+        }
+        if let build = try await client.latestBuild(appId: app) {
+            print(L("\(r.title): the store has version \(build.version) (build number \(build.versionCode)); the recipe is for \(r.versionName) (\(r.versionCode)).",
+                    "\(r.title): der Store führt Fassung \(build.version) (Build-Nummer \(build.versionCode)); das Rezept gilt für \(r.versionName) (\(r.versionCode))."))
+        } else {
+            print(L("\(r.title): Meta's answer names no current build.", "\(r.title): Metas Antwort nennt keinen aktuellen Build."))
+        }
+    } catch { fail("\(error)") }
+
 case "purchases":
     let r = recipe(o)
     guard let app = r.store.appId else { fail("\(MetaError.missingAppId)") }
@@ -476,7 +507,7 @@ case "plan", "fetch":
         print(L("Note: the recipe has no store app ID; ownership is not checked beforehand.",
                 "Hinweis: Im Rezept fehlt die Store-App-ID; der Besitz wird nicht vorab geprüft."))
     }
-    let interval = Double(o.value("interval") ?? "") ?? 5
+    let interval = Double(o.value("interval") ?? "") ?? 0
     // Ohne Meta-Dateien wird der Client nie benutzt; er bekommt dann auch keinen Token.
     let fetcher = Fetcher(client: client ?? MetaClient(token: "unbenutzt"), store: store, gate: RequestGate(minInterval: .seconds(interval)))
     do {
@@ -791,6 +822,8 @@ case "status":
             case .current(let stamp): geraet = L("installed, \(stamp)", "installiert, \(stamp)")
             case .olderToolchain(let stamp):
                 geraet = L("installed, \(stamp) – built with an older toolchain", "installiert, \(stamp) – mit älterer Toolchain gebaut")
+            case .olderGame(let stamp):
+                geraet = L("installed, \(stamp) – an older version of the game", "installiert, \(stamp) – eine ältere Fassung des Spiels")
             case .unstamped(let stamp):
                 geraet = L("installed, \(stamp) – without this tool's stamp", "installiert, \(stamp) – ohne Stempel dieses Werkzeugs")
             }

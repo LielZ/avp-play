@@ -6,7 +6,8 @@
  "versionName": "1.40.8_7379",
  "versionCode": 1716,
  "store": {
-  "appId": "2448060205267927"
+  "appId": "2448060205267927",
+  "pinned": true
  },
  "toolchain": {
   "target": "beatsaber140",

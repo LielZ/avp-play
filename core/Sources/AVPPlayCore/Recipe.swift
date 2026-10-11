@@ -30,6 +30,14 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public struct StoreInfo: Codable, Sendable {
         /// Store-App-ID für Besitz- und Kaufabfrage. Fehlt sie, kann der Besitz nicht geprüft werden.
         public var appId: String?
+        /// Das Spiel bleibt bei der Fassung dieses Rezepts: eine neuere aus dem Store wird nicht angeboten.
+        /// Für Spiele, deren neuere Fassungen bekanntermaßen nicht laufen (Beat Saber).
+        public var pinned: Bool?
+
+        public init(appId: String?, pinned: Bool? = nil) {
+            self.appId = appId
+            self.pinned = pinned
+        }
     }
     public struct Toolchain: Codable, Sendable {
         public var target: String

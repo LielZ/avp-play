@@ -70,7 +70,7 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     public var customIcon: String?
     public var storeArt = true
     /// Mindestabstand zwischen Abrufen bei Meta, in Sekunden.
-    public var interval: Double = 5
+    public var interval: Double = 0
     /// Auch installieren, wenn die App gerade läuft (sie wird dabei beendet). Ohne Angabe: nein.
     public var replaceRunning: Bool?
     /// Der Auftrag lädt nur. Was der Nutzer selbst bereitstellen muss, darf dann noch fehlen: es wird genannt,
@@ -341,8 +341,14 @@ public struct Installer: Sendable {
                 : L("Files: \(plan.count) needed, \(kept) in the library, nothing to download.", "Dateien: \(plan.count) gebraucht, \(kept) im Bestand, nichts zu laden."))
             return
         }
+        // Was dem Namen nach schon in einer anderen Fassung desselben Spiels liegt, wird nur geladen, wenn es sich
+        // geändert hat (Fetcher.adopt) – gesagt, bevor es losgeht, damit „129 zu laden“ nicht nach 13 GB klingt.
+        let elsewhere = todo.filter { $0.action == .download && $0.file.source == nil && $0.file.role != "apk"
+                                      && !store.siblings(of: $0.file, in: recipe).isEmpty }.count
         report(L("Files: \(plan.count) needed, \(kept) in the library, \(todo.count) to download.",
-                 "Dateien: \(plan.count) gebraucht, \(kept) im Bestand, \(todo.count) zu laden."))
+                 "Dateien: \(plan.count) gebraucht, \(kept) im Bestand, \(todo.count) zu laden.")
+               + (elsewhere > 0 ? L(" \(elsewhere) of them are in the library from another version of this game; each is taken from there if it is unchanged.",
+                                    " \(elsewhere) davon liegen aus einer anderen Fassung dieses Spiels im Bestand; jede wird von dort übernommen, wenn sie unverändert ist.") : ""))
 
         var client = MetaClient(token: "unbenutzt")       // ohne Meta-Dateien wird er nie benutzt
         if todo.contains(where: { $0.file.source == nil }) {
@@ -362,8 +368,10 @@ public struct Installer: Sendable {
             if ApkUnpacker.lacksArm64(found) { throw InstallError.wrongArchitecture(title, found.sorted()) }
         }
         let summary = try await fetcher.run(plan, recipe: recipe) { report("  " + $0) }
-        report(L("Downloaded: \(summary.downloaded) files, \(summary.kept) were already there.",
-                 "Geladen: \(summary.downloaded) Dateien, \(summary.kept) waren vorhanden."))
+        report(L("Downloaded: \(summary.downloaded) files, \(summary.kept) were already there"
+                 + (summary.adopted > 0 ? ", \(summary.adopted) unchanged ones taken from another version of the game." : "."),
+                 "Geladen: \(summary.downloaded) Dateien, \(summary.kept) waren vorhanden"
+                 + (summary.adopted > 0 ? ", \(summary.adopted) unveränderte aus einer anderen Fassung des Spiels übernommen." : ".")))
         if !summary.withheld.isEmpty {
             report(L("Without \(summary.withheld.count) add-on file(s) Meta doesn't deliver for this account: \(summary.withheld.joined(separator: ", ")). The game is installed without them. After buying the add-on, remove the game's files on its page and download again.",
                      "Ohne \(summary.withheld.count) Zusatzdatei(en), die Meta für dieses Konto nicht ausliefert: \(summary.withheld.joined(separator: ", ")). Das Spiel wird ohne sie installiert. Nach einem Kauf des Zusatzinhalts: die Dateien des Spiels auf seiner Seite entfernen und neu laden."))

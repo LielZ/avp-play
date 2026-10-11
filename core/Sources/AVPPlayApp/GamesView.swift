@@ -189,7 +189,7 @@ struct StatusBadge: View {
         if busy { return (L("Installing", "Wird installiert"), .blue, "arrow.triangle.2.circlepath") }
         switch status.onDevice {
         case .current: return (L("On the Vision Pro", "Auf der Vision Pro"), .green, "checkmark.circle.fill")
-        case .olderToolchain: return (L("Update available", "Aktualisierung möglich"), .orange, "arrow.up.circle.fill")
+        case .olderToolchain, .olderGame: return (L("Update available", "Aktualisierung möglich"), .orange, "arrow.up.circle.fill")
         case .unstamped: return (L("Installed, older build", "Installiert, älterer Stand"), .orange, "arrow.up.circle.fill")
         case .notInstalled: return (L("Not installed", "Nicht installiert"), .secondary, "circle.dashed")
         case .unknown: return (L("Device not reachable", "Gerät nicht erreichbar"), .secondary, "wifi.slash")
@@ -330,6 +330,62 @@ struct GameCard: View {
     }
 }
 
+/// Der Hinweis auf eine neuere Fassung im Meta-Store, mit der Wahl zwischen ihr und der geprüften.
+///
+/// Er erscheint nur bei Spielen mit einem geprüften Rezept, und nur, wenn der Store etwas Neueres führt oder
+/// gerade etwas Neueres gewählt ist. Gewechselt wird hier nur das Rezept; geladen und installiert wird mit dem
+/// üblichen Knopf darunter.
+struct StoreVersionBox: View {
+    @EnvironmentObject var model: AppModel
+    let game: Game
+
+    var body: some View {
+        let newer = model.storeUpdate(for: game)
+        if newer != nil || game.testedVersion != nil {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let tested = game.testedVersion {
+                        Label(L("You are using version \(game.recipe.versionName) from the Meta Store – not tested with AVP Play",
+                                "Du verwendest Fassung \(game.recipe.versionName) aus dem Meta-Store – mit AVP Play nicht getestet"),
+                              systemImage: "exclamationmark.triangle").font(.headline).foregroundStyle(.orange)
+                        Text(L("The project tested version \(tested). This newer one may not start, may show errors, and add-on content may stay locked. If it works, say so with the feedback buttons below – that is how others learn of it. Your saved games stay on the Vision Pro either way.",
+                               "Geprüft hat das Projekt Fassung \(tested). Diese neuere startet vielleicht nicht, zeigt vielleicht Fehler, und Zusatzinhalte bleiben vielleicht gesperrt. Wenn sie läuft, melde das mit den Knöpfen unten – so erfahren es die anderen. Deine Spielstände bleiben in beiden Fällen auf der Vision Pro."))
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button(L("Go Back to Tested Version \(tested)", "Zurück zur geprüften Fassung \(tested)")) { model.useTestedVersion(game) }
+                            if let newer {
+                                Button(L("Switch to \(newer.version)", "Auf \(newer.version) wechseln")) { model.useNewestVersion(game) }
+                                    .help(L("The Meta Store has an even newer version by now.", "Der Meta-Store führt inzwischen eine noch neuere Fassung."))
+                            }
+                        }
+                        .disabled(model.preparing.contains(game.id))
+                    } else if let newer {
+                        Label(L("The Meta Store has a newer version: \(newer.version)", "Im Meta-Store gibt es eine neuere Fassung: \(newer.version)"),
+                              systemImage: "arrow.up.circle").font(.headline)
+                        Text(L("AVP Play installs version \(game.recipe.versionName), the one the project tested. You can use the newest one instead – it has not been tested with AVP Play: it may not start, and add-on content may stay locked. You can come back to the tested version at any time.",
+                               "AVP Play installiert Fassung \(game.recipe.versionName), die das Projekt geprüft hat. Du kannst stattdessen die neueste verwenden – sie ist mit AVP Play nicht getestet: Sie startet vielleicht nicht, und Zusatzinhalte bleiben vielleicht gesperrt. Zur geprüften Fassung kommst du jederzeit zurück."))
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button(L("Use Newest Version \(newer.version) (Untested)", "Neueste Fassung \(newer.version) verwenden (ungetestet)")) {
+                                model.useNewestVersion(game)
+                            }
+                            Text(L("Tested: \(game.recipe.versionName)", "Geprüft: \(game.recipe.versionName)")).font(.callout).foregroundStyle(.secondary)
+                        }
+                        .disabled(model.preparing.contains(game.id))
+                    }
+                    if model.preparing.contains(game.id) {
+                        HStack { ProgressView().controlSize(.small); Text(model.prepareNote[game.id] ?? "").font(.callout) }
+                    } else if !game.draft, let note = model.prepareNote[game.id] {
+                        Label(note, systemImage: "info.circle").font(.callout).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            }
+        }
+    }
+}
+
 struct GameDetail: View {
     @EnvironmentObject var model: AppModel
     let game: Game
@@ -341,6 +397,8 @@ struct GameDetail: View {
                 CoverImage(game: game)
                     .frame(maxHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                StoreVersionBox(game: game)
 
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -487,6 +545,7 @@ struct GameDetail: View {
         // Erst wenn jemand die Seite eines ungetesteten Spiels öffnet, wird nachgeschlagen, woraus es besteht.
         // Sagt der Katalog erst danach, unter welchem Namen die Toolchain das Spiel kennt, wird noch einmal geprüft.
         .task(id: "\(game.id) \(game.catalog?.target ?? "")") { model.prepare(game) }
+        .task(id: game.id) { model.checkStoreVersions(only: game) }
         .confirmationDialog(L("Remove the files of \(game.recipe.title) from this Mac?", "Die Dateien von \(game.recipe.title) von diesem Mac entfernen?"),
                             isPresented: $confirmRemove) {
             Button(L("Remove \(Installer.gigabytes(game.storeBytes))", "\(Installer.gigabytes(game.storeBytes)) entfernen"), role: .destructive) { model.removeFiles(game) }
@@ -551,7 +610,7 @@ struct GameDetail: View {
     private var actionTitle: String {
         switch game.status.onDevice {
         case .current: return L("Reinstall", "Neu installieren")
-        case .olderToolchain, .unstamped: return L("Update", "Aktualisieren")
+        case .olderToolchain, .olderGame, .unstamped: return L("Update", "Aktualisieren")
         case .notInstalled, .unknown: return L("Install", "Installieren")
         }
     }
@@ -582,6 +641,8 @@ struct GameDetail: View {
         case .notInstalled: return L("Not installed yet.", "Noch nicht installiert.")
         case .current: return L("Installed and up to date.", "Installiert und auf dem neuesten Stand.")
         case .olderToolchain: return L("Installed. The current toolchain produces a newer build – “Update” builds it; saved games and data are kept.", "Installiert. Mit der jetzigen Toolchain gibt es eine neuere Fassung – „Aktualisieren“ baut sie; Spielstände und Daten bleiben.")
+        case .olderGame(let stamp): return L("Installed in an older version of the game (\(stamp)). This app now has version \(game.recipe.versionName) – “Update” downloads what is new and installs it; saved games and data are kept.",
+                                             "Installiert in einer älteren Fassung des Spiels (\(stamp)). Dieses Programm hat jetzt Fassung \(game.recipe.versionName) – „Aktualisieren“ lädt, was neu ist, und installiert sie; Spielstände und Daten bleiben erhalten.")
         case .unstamped: return L("Installed, but as an older build that was not made by this app. “Update” replaces it; saved games and data are kept.", "Installiert, aber in einer älteren Fassung, die nicht von diesem Programm stammt. „Aktualisieren“ ersetzt sie; Spielstände und Daten bleiben.")
         }
     }

@@ -14,12 +14,16 @@ struct Game: Identifiable {
     var catalog: CatalogGame?
     /// Kein mitgeliefertes Rezept, sondern ein Entwurf aus Katalog und Metas Werkzeug – oder erst ein Platzhalter.
     var draft = false
+    /// Gesetzt, wenn statt der geprüften Fassung die neueste aus dem Store gewählt ist: der Name der geprüften.
+    var testedVersion: String?
     var id: String { recipe.id }
     /// Sind die Dateien des Spiels bekannt? Bei einem Platzhalter noch nicht.
     var prepared: Bool { !draft || !recipe.files.isEmpty }
     /// Wie weit dem Spiel zu trauen ist. Was der Katalog sagt, gilt – dort legt das Projekt fest oder zählen die
     /// Meldungen. Ohne Katalog (kein Netz, abgeschaltet, Sonderapp) gilt das mitgelieferte Rezept.
     var trust: Trust {
+        // Geprüft ist eine Fassung, nicht ein Name: die neuere aus dem Store hat das Projekt nicht gesehen.
+        if testedVersion != nil { return .untested }
         switch catalog?.status {
         case "verified": return .verified
         case "community": return .community
@@ -35,7 +39,7 @@ struct Game: Identifiable {
     var verified: Bool { trust == .verified }
     var installed: Bool {
         switch status.onDevice {
-        case .current, .olderToolchain, .unstamped: return true
+        case .current, .olderToolchain, .olderGame, .unstamped: return true
         case .notInstalled, .unknown: return false
         }
     }
@@ -180,6 +184,10 @@ final class AppModel: ObservableObject {
     @AppStorage("usageCounts") var usageCounts = true
     /// Titelbilder für Spiele, die noch nicht geladen sind, von deren öffentlicher Store-Seite holen.
     @AppStorage("storePictures") var storePictures = true
+    /// Der aktuelle Build geprüfter Store-Spiele, wie der Katalog ihn kennt (Kennung des Rezepts → Build).
+    @Published var storeBuilds: [String: CatalogBuild] = [:]
+    /// Für welche Spiele die neueste Fassung aus dem Store statt der geprüften gewählt ist.
+    @Published var latestChoices = StoreUpdate.Choices.load()
     /// Ältere Toolchains von selbst entfernen, sobald eine neuere installiert ist und nichts mehr mit ihnen baut.
     @AppStorage("autoRemoveOldToolchains") var autoRemoveOldToolchains = true
     /// Besorgt diese Bilder: zwei Abrufe zugleich, mit Zwischenspeicher.
@@ -503,6 +511,7 @@ final class AppModel: ObservableObject {
         toolchainRevision = s.toolchainRevision
         games = s.games
         loadOwnCatalogEntries()
+        checkStoreVersions()
         loadProblem = s.loadProblem
         device = s.device
         devices = s.devices
@@ -896,7 +905,7 @@ final class AppModel: ObservableObject {
     var updatable: [Game] {
         games.filter { game in
             switch game.status.onDevice {
-            case .olderToolchain, .unstamped: return blocker(for: game) == nil
+            case .olderToolchain, .olderGame, .unstamped: return blocker(for: game) == nil
             case .current, .notInstalled, .unknown: return false
             }
         }

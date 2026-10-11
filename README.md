@@ -77,7 +77,7 @@ recipes in [`recipes/`](recipes) are:
 
 | Game | Source | Notes |
 |---|---|---|
-| Asgard's Wrath 2 | Meta Store | optional language packs |
+| Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick |
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
 | Beat Saber 1.40.8 | Meta Store | purchased song packs are downloaded and unlocked |
 | Moss | Meta Store | |
@@ -91,11 +91,12 @@ recipes in [`recipes/`](recipes) are:
 | Resident Evil 4 | Meta Store | about 8.5 GB; runs with a fix a user sent in |
 | Skydance's BEHEMOTH | Meta Store | about 28 GB; runs with fixes users sent in; the first start builds shaders behind the loading screen for several minutes |
 | Maestro | Meta Store | song packs you have not bought are skipped |
+| Star Wars: Tales from the Galaxy's Edge | Meta Store | about 7 GB; runs with a fix a user sent in and the project's own |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |
 | Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German |
 
-These seventeen are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
+These eighteen are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
 Quest title from the Meta Store – some 17,000, loaded page by page as you scroll. What you see on each is a label:
 
 | Label | Meaning |
@@ -111,7 +112,7 @@ engine. Each verified game needed its own adjustments before it ran, so expect a
 Afterwards say how it went with one click (that is what the labels are made of), or let an AI coding assistant
 try to fix it ("Fix with AI") and send the fix in for review.
 
-All seventeen were installed with this app on the author's headset. "Community Verified" means exactly what it
+All eighteen were installed with this app on the author's headset. "Community Verified" means exactly what it
 says: reports from users, not a guarantee. A recipe is tied to one build of a game; other builds need
 their own recipe.
 
@@ -142,8 +143,13 @@ their own recipe.
   are yours. Add-on content is downloaded only for purchases Meta confirms. Bought
   something later? **Sync DLCs** on the game's page asks again, downloads what is new and adds it to the installed
   game without building it again.
-- **Requests to Meta are throttled** and stop at the first unexpected answer. The app never tries a file to see
-  whether Meta will serve it.
+- **Requests to Meta** stop at the first unexpected answer. The app never tries a file to see whether Meta will
+  serve it.
+- **Newer versions in the Meta Store:** for verified games you own, the app asks Meta which version is current –
+  at most once in twenty hours per game, with the query the store's own apps use (it is not a documented
+  developer interface) – and offers it next to the tested one, as your choice and marked as untested. Files that
+  did not change between two versions are taken from the copy on your Mac instead of being downloaded again.
+  Beat Saber stays at its tested version.
 - **Apple signing** uses the team you are signed in with in Xcode. The app reads the list of teams from Xcode's
   settings and nothing else.
 - **The project's own service** (`avpplay.martek.de`) holds the list of further games and what users report about
