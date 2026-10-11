@@ -119,8 +119,13 @@ their own recipe.
   them. The app sends it what you search for and the identifiers of games whose page you open; a report you
   choose to send says which game and build, and whether it works. It never receives your Meta sign-in or
   anything about your account or device, and you can turn it off in the settings.
-- There is no telemetry and no account with this project. The only other connection the app makes is the daily
-  question to GitHub about a newer release, which you can turn off as well.
+- **There is a little telemetry**, purely out of curiosity about how much AVP Play is used and which games
+  people actually install with it. Once a day the app tells the project's service that it is in use, with its
+  version number, and once per game that you have installed it. Neither message carries an identifier of you,
+  your Mac or your Vision Pro, and the service keeps nothing but totals per day. You can turn it off under
+  Settings › Online catalogue.
+- There is no account with this project. The only other connection the app makes is the daily question to
+  GitHub about a newer release, which you can turn off as well.
 
 ## Build it yourself
 
