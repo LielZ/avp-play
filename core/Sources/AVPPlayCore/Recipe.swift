@@ -19,6 +19,8 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var icon: IconSource?
     /// Ganze Verzeichnisbäume für Spiele, die kein APK sind (siehe `RecipeTree`).
     public var trees: [RecipeTree]?
+    /// Versteht das Spiel eine Liste eigener Server (Adressen, Admin-Zugang)? Dann steht hier, wohin sie gehört.
+    public var servers: ServerListSupport?
 
     public struct IconSource: Codable, Sendable, Equatable {
         /// Steam-App-ID: Hintergrund und Logo aus dem lokalen Bildspeicher des Steam-Clients des Nutzers.
@@ -252,6 +254,18 @@ extension Recipe {
         }
         if let app = store.appId, !(app.allSatisfy(\.isNumber) && !app.isEmpty) {
             throw RecipeError.invalid(L("store app ID", "Store-App-ID"))
+        }
+        if let servers {
+            guard Recipe.isSafeRelativePath(servers.dest), Recipe.isSafeName(servers.file),
+                  servers.defaultPort.map({ (1...65535).contains($0) }) ?? true else {
+                throw RecipeError.invalid(L("server list", "Serverliste"))
+            }
+            for server in servers.builtin ?? [] {
+                guard GameServerStore.normalize(server.address, defaultPort: servers.defaultPort ?? 27015) != nil,
+                      !server.name.isEmpty, GameServerStore.cleanName(server.name) == server.name else {
+                    throw RecipeError.invalid(L("built-in server '\(server.address)'", "eingebauter Server '\(server.address)'"))
+                }
+            }
         }
         if let steam = icon?.steamAppId, !(steam.allSatisfy(\.isNumber) && !steam.isEmpty) {
             throw RecipeError.invalid(L("Steam app ID", "Steam-App-ID"))

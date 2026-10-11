@@ -581,6 +581,11 @@ public struct Installer: Sendable {
 
         try stageDataTrees(device: device, bundle: bundle)
 
+        // Die eigenen Server des Nutzers, wenn das Spiel so eine Liste versteht.
+        if recipe.servers != nil, try GameServerStore().push(recipe: recipe, device: device, bundle: bundle, control: control) {
+            report(L("Server list copied to the game.", "Serverliste zum Spiel kopiert."))
+        }
+
         // Assets aus dem APK: als Ordner, wenn Anzahl oder Gesamtgröße abweichen. Der entpackte Baum entsteht
         // beim Build; fehlt er (Kopieren ohne vorherigen Build mit dieser Toolchain), wird er hier angelegt.
         try toolchain.prepare(recipe: recipe, store: store)

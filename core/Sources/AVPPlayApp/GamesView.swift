@@ -436,6 +436,8 @@ struct GameDetail: View {
 
                 if !languageFiles.isEmpty || game.recipe.addons != nil || !extras.isEmpty { optionalContent }
 
+                if game.recipe.servers != nil { ServerListBox(game: game) }
+
                 if game.installed { FeedbackBox(game: game) }
 
                 GroupBox(L("Good to Know", "Gut zu wissen")) {

@@ -8,7 +8,7 @@
  "store": {},
  "toolchain": {
   "target": "cs1",
-  "minCommit": "7403034"
+  "minCommit": "e36dc96"
  },
  "files": [
   {
@@ -80,6 +80,17 @@
    ]
   }
  ],
+ "servers": {
+  "dest": "android-files/xash",
+  "file": "avpplay-servers.txt",
+  "defaultPort": 27015,
+  "builtin": [
+   {
+    "address": "152.53.113.187:27015",
+    "name": "InSpaze"
+   }
+  ]
+ },
  "icon": {
   "steamAppId": "10"
  },
@@ -100,12 +111,16 @@
     "de": "Die Prüfsummen der Kenndateien stammen aus den Steam-Depots; andere Fassungen des Spiels können abweichen."
    },
    {
-    "en": "Needs the fork from 7403034 on: frame pacing, the aim angle, the eye size and the smaller, lower HUD for this game.",
-    "de": "Braucht den Fork ab 7403034: Bildtakt, Zielwinkel, Augenbildgröße und das kleinere, tiefere HUD für dieses Spiel."
+    "en": "Needs the fork from e36dc96 on: frame pacing, the aim angle, the eye size, the smaller and lower HUD, and your own servers for this game.",
+    "de": "Braucht den Fork ab e36dc96: Bildtakt, Zielwinkel, Augenbildgröße, das kleinere, tiefere HUD und die eigenen Server für dieses Spiel."
    },
    {
     "en": "Known: the weapon model occasionally showed stray triangles; the cause is not found yet.",
     "de": "Bekannt: Am Waffenmodell waren gelegentlich einzelne Dreiecke zu sehen; die Ursache ist noch nicht gefunden."
+   },
+   {
+    "en": "Your own servers: the game's page keeps a list of addresses and, if you like, admin passwords. In the game they appear in the server list under Multiplayer › Internet games, and on a server with admin access the quick menu (press the left stick) controls bots, maps and settings as it does when you host.",
+    "de": "Eigene Server: Die Seite des Spiels führt eine Liste mit Adressen und auf Wunsch Admin-Passwörtern. Im Spiel stehen sie in der Serverliste unter Multiplayer › Internet games, und auf einem Server mit Admin-Zugang steuert das Schnellmenü (linken Stick drücken) Bots, Karten und Einstellungen wie beim eigenen Spiel."
    }
   ]
  }

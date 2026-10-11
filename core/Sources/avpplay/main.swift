@@ -107,6 +107,9 @@ avpplay – command line for the AVP Play core library
   avpplay install <id> --team <team ID>        build, install, copy missing data, unlock add-on content
   avpplay stage <id>                           only copy missing data and add-on content (no build)
   avpplay renew [--dry-run] [--force <id>]     sign installed games again whose signature runs out soon (what the background service does)
+  avpplay servers <id> [add <address> [--name <name>] [--admin-stdin] | remove <address> | push]
+                                               your own game servers for a game that understands such a list; the admin
+                                               password is read from standard input and kept in the keychain
   avpplay job start <id> --team <team ID>      job: check, download, build, install, copy, unlock
   avpplay job resume <job>                     resume an interrupted or stopped job
   avpplay job show|cancel <job>                show progress / cancel            avpplay jobs   all jobs
@@ -151,6 +154,9 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay install <id> --team <Team-ID>        bauen, installieren, Daten ergänzend kopieren, Zusatzinhalte freischalten
   avpplay stage <id>                           nur Daten und Zusatzinhalte ergänzend kopieren (ohne Build)
   avpplay renew [--dry-run] [--force <id>]     installierte Spiele neu signieren, deren Signatur bald abläuft (was der Hintergrunddienst tut)
+  avpplay servers <id> [add <Adresse> [--name <Name>] [--admin-stdin] | remove <Adresse> | push]
+                                               eigene Spielserver für ein Spiel, das so eine Liste versteht; das Admin-Passwort
+                                               wird von der Standardeingabe gelesen und im Schlüsselbund abgelegt
   avpplay job start <id> --team <Team-ID>      Auftrag: prüfen, laden, bauen, installieren, kopieren, freischalten
   avpplay job resume <Auftrag>                 unterbrochenen oder angehaltenen Auftrag fortsetzen
   avpplay job show|cancel <Auftrag>            Stand zeigen / abbrechen          avpplay jobs   alle Aufträge
@@ -172,7 +178,7 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 """)
 }
 
-let valued: Set<String> = ["account", "steam-account", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force",
+let valued: Set<String> = ["account", "steam-account", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
                            "team", "device", "bundle-id", "toolchain", "icon", "tool", "jobs", "toolchains"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
@@ -602,6 +608,47 @@ case "toolchains":
         print(L("Version \(m.version) (\(m.commit)), created \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)",
                 "Version \(m.version) (\(m.commit)), erstellt \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)"))
     }
+
+case "servers":
+    let r = recipe(o)
+    let servers = GameServerStore()
+    do {
+        guard r.servers != nil else { throw GameServerError.notSupported(r.title) }
+        switch o.positional.count > 2 ? o.positional[2] : "list" {
+        case "add":
+            guard o.positional.count > 3 else { fail(L("Give the server's address.", "Die Adresse des Servers angeben.")) }
+            let server = try servers.add(address: o.positional[3], name: o.value("name") ?? "", recipe: r)
+            if o.flags.contains("admin-stdin") {
+                guard let line = readLine(strippingNewline: true), !line.isEmpty else { throw GameServerError.badPassword }
+                try servers.setAdminPassword(line, address: server.address, recipe: r)
+            }
+            print(L("\(server.name) (\(server.address)) is in the list.", "\(server.name) (\(server.address)) steht in der Liste."))
+        case "remove":
+            guard o.positional.count > 3, let support = r.servers,
+                  let address = GameServerStore.normalize(o.positional[3], defaultPort: support.defaultPort ?? 27015) else {
+                fail(L("Give the server's address.", "Die Adresse des Servers angeben."))
+            }
+            try servers.remove(address: address, recipe: r)
+            print(L("\(address) has been removed.", "\(address) wurde entfernt."))
+        case "push":
+            let device = try DeviceControl().pick(udid: o.value("device"))
+            let bundle = o.value("bundle-id") ?? SigningRecord.load(store: contentStore(o), recipe: r)?.bundleId
+                ?? Toolchain.defaultBundleId(target: r.toolchain.target)
+            print(try servers.push(recipe: r, device: device, bundle: bundle)
+                ? L("The list is in the game's data on the Vision Pro; it applies from the next start of the game.",
+                    "Die Liste liegt bei den Daten des Spiels auf der Vision Pro; sie gilt ab dem nächsten Start des Spiels.")
+                : L("Nothing to copy: the list is empty and there is none on the Vision Pro.", "Nichts zu kopieren: Die Liste ist leer, und auf der Vision Pro liegt keine."))
+        default:
+            let list = servers.all(recipe: r)
+            let fixed = Set(GameServerStore.builtin(recipe: r).map(\.address))
+            if list.isEmpty { print(L("No servers yet.", "Noch keine Server.")) }
+            for server in list {
+                let admin = servers.hasAdminPassword(address: server.address, recipe: r)
+                print("\(server.address)  \(server.name)  \(admin ? L("admin access stored", "Admin-Zugang hinterlegt") : L("no admin access", "kein Admin-Zugang"))"
+                      + (fixed.contains(server.address) ? L("  (built in)", "  (eingebaut)") : ""))
+            }
+        }
+    } catch { fail("\(error)") }
 
 case "renew":
     let chosen = (o.value("toolchain") ?? ProcessInfo.processInfo.environment["AVPPLAY_TOOLCHAIN"]).flatMap { try? Toolchain(root: URL(fileURLWithPath: $0)) }
