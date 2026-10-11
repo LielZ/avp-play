@@ -40,15 +40,32 @@ final class RecipeTests: XCTestCase {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("recipes")
         let all = try RecipeStore(directory: dir).loadAll()
-        // Die sieben Referenzspiele sind da; dazu kommen Rezepte, die aus einem geprüften Entwurf entstanden sind.
-        // Die tragen die Kennung des Entwurfs (`store-<App-Kennung>`), damit schon Geladenes weiter gilt.
+        // Die Referenzspiele und Sonderapps sind da; dazu kommen Rezepte, die aus einem geprüften Entwurf entstanden
+        // sind. Die tragen die Kennung des Entwurfs (`store-<App-Kennung>`), damit schon Geladenes weiter gilt.
         let ids = Set(all.map(\.id))
-        XCTAssertTrue(ids.isSuperset(of: ["alyx", "batman", "beatsaber140", "doom3quest", "moss", "walkabout", "wrath2"]))
-        for recipe in all where !["alyx", "batman", "beatsaber140", "doom3quest", "moss", "walkabout", "wrath2"].contains(recipe.id) {
+        let byHand: Set<String> = ["alyx", "batman", "beatsaber140", "csvr", "doom3quest", "moss", "walkabout", "wrath2"]
+        XCTAssertTrue(ids.isSuperset(of: byHand))
+        for recipe in all where !byHand.contains(recipe.id) {
             XCTAssertEqual(recipe.id, recipe.store.appId.map(DraftRecipe.identifier(appId:)), "\(recipe.id)")
             XCTAssertEqual(recipe.status.playability, "verified", "\(recipe.id)")
             XCTAssertFalse(recipe.files.isEmpty, "\(recipe.id)")
         }
+        // Counter-Strike: ein frei ladbares APK mit Prüfsumme, und die Daten des Originalspiels als ein Ordner aus dem
+        // Steam-Konto des Nutzers – nur 'cstrike' und 'valve', an dem Ort, an dem die Engine sie sucht.
+        let cs = try XCTUnwrap(all.first { $0.id == "csvr" })
+        XCTAssertEqual(cs.files.map(\.role), ["apk"])
+        XCTAssertEqual(cs.files[0].source?.kind, .url)
+        XCTAssertNotNil(cs.files[0].sha256)
+        let data = try XCTUnwrap(TreeStore.dataTrees(of: cs).first)
+        XCTAssertEqual(TreeStore.dataTrees(of: cs).count, 1)
+        XCTAssertTrue(TreeStore.toolchainTrees(of: cs).isEmpty)
+        XCTAssertEqual(data.dest, "android-files/xash")
+        XCTAssertEqual(data.only.map(Set.init), ["cstrike", "valve"])
+        XCTAssertEqual(data.source.kind, .user)
+        XCTAssertEqual(data.source.steam?.app, "10")
+        XCTAssertEqual(data.source.steam?.depots.map(\.id), ["11", "1"])
+        XCTAssertTrue(data.markers.allSatisfy { m in data.only!.contains { m.path.hasPrefix($0 + "/") } })
+
         // Half-Life: Alyx bietet die deutsche Sprachausgabe als wählbare Datei an: nie Pflicht, aus dem Steam-Konto
         // des Nutzers in einer festgelegten Fassung, und am Ziel das Archiv des Sprachordners, den das Spiel einbindet.
         let alyx = try XCTUnwrap(all.first { $0.id == "alyx" })
@@ -630,6 +647,96 @@ final class TreeTests: XCTestCase {
         XCTAssertEqual(store.toolchainEnvironment(recipe: r), ["KL_LX_GAME": target.path])
         // die Quelle bleibt unberührt
         XCTAssertEqual(try String(contentsOf: right.appendingPathComponent("bin/app"), encoding: .utf8), "abc")
+    }
+
+    /// Ein Datenordner (die Spieldaten für einen freien Port) hat einen Ort auf dem Gerät; die Rollen eines
+    /// Linux-Spiels haben keinen und kommen je einmal vor.
+    func testADataFolderNeedsADestinationOfItsOwn() throws {
+        let sha = String(repeating: "a", count: 64)
+        func data(_ name: String, dest: String?, only: [String]? = nil) -> RecipeTree {
+            var t = tree(name, role: .data, markers: [.init(path: "valve/halflife.wad", size: nil, sha256: sha)])
+            t.dest = dest
+            t.only = only
+            return t
+        }
+        try recipe(trees: [data("a", dest: "android-files/xash", only: ["valve", "cstrike"])]).validate()
+        try recipe(trees: [data("a", dest: "android-files/a"), data("b", dest: "android-files/b")]).validate()
+        for bad in [nil, "", "../x", "/etc", "a//b"] {
+            XCTAssertThrowsError(try recipe(trees: [data("a", dest: bad)]).validate(), bad ?? "nil")
+        }
+        XCTAssertThrowsError(try recipe(trees: [data("a", dest: "x"), data("b", dest: "x")]).validate())
+        for bad in [[], ["a/b"], [".."], ["valve", "valve"]] {
+            XCTAssertThrowsError(try recipe(trees: [data("a", dest: "x", only: bad)]).validate(), "\(bad)")
+        }
+        var game = tree(markers: [.init(path: "bin/app", size: nil, sha256: sha)])
+        game.dest = "lx"
+        XCTAssertThrowsError(try recipe(trees: [game]).validate())
+        // Die Toolchain erfährt von einem Datenordner nichts: zum Bauen braucht sie ihn nicht.
+        let r = recipe(trees: [data("a", dest: "android-files/xash")])
+        XCTAssertTrue(TreeStore(store: ContentStore(root: try scratch())).toolchainEnvironment(recipe: r).isEmpty)
+        XCTAssertEqual(TreeStore.dataTrees(of: r).map(\.name), ["a"])
+        XCTAssertTrue(TreeStore.toolchainTrees(of: r).isEmpty)
+    }
+
+    /// Zeigt der Nutzer auf seinen ganzen Spielordner, kommt nur mit, was zum Baum gehört.
+    func testOnlyWhatBelongsToTheTreeIsTaken() throws {
+        let dir = try scratch()
+        let fm = FileManager.default
+        let install = dir.appendingPathComponent("Half-Life")
+        for sub in ["valve", "cstrike/maps", "anderes_spiel"] { try fm.createDirectory(at: install.appendingPathComponent(sub), withIntermediateDirectories: true) }
+        try Data("wad".utf8).write(to: install.appendingPathComponent("valve/halflife.wad"))
+        try Data("karte".utf8).write(to: install.appendingPathComponent("cstrike/maps/a.bsp"))
+        try Data("fremd".utf8).write(to: install.appendingPathComponent("anderes_spiel/x.bin"))
+        try Data("programm".utf8).write(to: install.appendingPathComponent("hl.exe"))
+        var t = tree("gamedata", role: .data, markers: [.init(path: "valve/halflife.wad", size: 3, sha256: try Hashing.sha256(of: install.appendingPathComponent("valve/halflife.wad")))])
+        t.dest = "android-files/xash"
+        t.only = ["valve", "cstrike"]
+        let r = recipe(trees: [t])
+        let store = TreeStore(store: ContentStore(root: dir.appendingPathComponent("bestand")))
+        XCTAssertEqual(try store.adopt(recipe: r, from: [install]).adopted, ["gamedata"])
+        XCTAssertEqual(TreeStore.listing(of: store.url(for: t, in: r)), ["valve/halflife.wad": 3, "cstrike/maps/a.bsp": 5])
+
+        // Dasselbe beim Zusammensetzen aus Schichten (Steam-Depots).
+        let depotA = dir.appendingPathComponent("depot_a"), depotB = dir.appendingPathComponent("depot_b")
+        for sub in ["depot_a/cstrike", "depot_a/platform", "depot_b/valve", "depot_b/bin"] { try fm.createDirectory(at: dir.appendingPathComponent(sub), withIntermediateDirectories: true) }
+        try Data("cs".utf8).write(to: depotA.appendingPathComponent("cstrike/liblist.gam"))
+        try Data("nein".utf8).write(to: depotA.appendingPathComponent("platform/x"))
+        try Data("wad".utf8).write(to: depotB.appendingPathComponent("valve/halflife.wad"))
+        try Data("nein".utf8).write(to: depotB.appendingPathComponent("bin/y"))
+        try Data("nein".utf8).write(to: depotB.appendingPathComponent("hl.exe"))
+        let fresh = TreeStore(store: ContentStore(root: dir.appendingPathComponent("bestand2")))
+        XCTAssertTrue(try fresh.assemble(t, in: r, from: [depotA, depotB]))
+        XCTAssertEqual(TreeStore.listing(of: fresh.url(for: t, in: r)), ["cstrike/liblist.gam": 2, "valve/halflife.wad": 3])
+    }
+
+    /// Beim ersten Mal geht hinüber, was fehlt oder halb ankam; danach nur noch, was fehlt – was das Spiel in seinen
+    /// Daten geändert hat (seine Einstellungen), bleibt.
+    func testASettledDataFolderIsOnlyCompleted() {
+        let local: [String: Int64] = ["valve/halflife.wad": 100, "cstrike/config.cfg": 10, "cstrike/maps/a.bsp": 50]
+        let remote: [String: Int64] = ["valve/halflife.wad": 100, "cstrike/config.cfg": 37, "cstrike/.fontcache/a.bmp": 9]
+        XCTAssertEqual(StagePlan.missing(ofTree: local, remote: [:], settled: false), local)
+        XCTAssertEqual(StagePlan.missing(ofTree: local, remote: remote, settled: false), ["cstrike/config.cfg": 10, "cstrike/maps/a.bsp": 50])
+        XCTAssertEqual(StagePlan.missing(ofTree: local, remote: remote, settled: true), ["cstrike/maps/a.bsp": 50])
+        XCTAssertTrue(StagePlan.missing(ofTree: local, remote: local, settled: false).isEmpty)
+    }
+
+    /// Die Kenndatei auf dem Gerät heißt nach der Fassung des Baums: eine andere Fassung, ein anderer Name.
+    func testTheDeviceStampFollowsTheMarkers() throws {
+        let a = String(repeating: "a", count: 64), b = String(repeating: "b", count: 64)
+        let one = tree(markers: [.init(path: "x", size: 1, sha256: a), .init(path: "y", size: nil, sha256: b)])
+        let same = tree("other", markers: [.init(path: "y", size: 7, sha256: b.uppercased()), .init(path: "x", size: nil, sha256: a)])
+        let newer = tree(markers: [.init(path: "x", size: 1, sha256: b), .init(path: "y", size: nil, sha256: b)])
+        XCTAssertEqual(one.deviceStampName, same.deviceStampName)
+        // Der Name darf sich mit keiner Fassung dieses Programms ändern: Ein Gerät, dessen Ordner als vollständig
+        // gilt, sähe sonst wie neu aus, und die Einstellungen des Spielers würden ersetzt.
+        XCTAssertEqual(one.deviceStampName, ".avpplay-c48fe6b4bf27b529")
+        let shipped = try RecipeStore(directory: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("recipes")).load(id: "csvr")
+        XCTAssertEqual(shipped.trees?.first?.deviceStampName, ".avpplay-8b42b32f44916b25")
+        XCTAssertNotEqual(one.deviceStampName, newer.deviceStampName)
+        XCTAssertTrue(one.deviceStampName.hasPrefix(".avpplay-"))
+        XCTAssertEqual(one.deviceStampName.count, 25)
+        XCTAssertTrue(Recipe.isSafeRelativePath(one.deviceStampName))
     }
 }
 

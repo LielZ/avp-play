@@ -200,12 +200,30 @@ extension Recipe {
             if let s = f.size, s < 0 { throw RecipeError.invalid(L("size of '\(f.name)'", "Größe von '\(f.name)'")) }
         }
         var roles = Set<RecipeTree.Role>()
+        var dataDestinations = Set<String>()
         for t in trees ?? [] {
             guard Recipe.isSafeName(t.name), names.insert(t.name).inserted else {
                 throw RecipeError.invalid(L("folder name '\(t.name)'", "Ordnername '\(t.name)'"))
             }
-            guard roles.insert(t.role).inserted else {
-                throw RecipeError.invalid(L("folder role '\(t.role.rawValue)' appears twice", "Ordnerrolle '\(t.role.rawValue)' kommt doppelt vor"))
+            if t.role == .data {
+                // Ein Datenordner braucht einen Ort auf dem Gerät, und zwar einen eigenen: zwei Bäume am selben Ort
+                // würden einander für unvollständig halten.
+                guard let d = t.dest, !d.isEmpty, Recipe.isSafeRelativePath(d), dataDestinations.insert(d).inserted else {
+                    throw RecipeError.invalid(L("destination folder of '\(t.name)'", "Zielordner von '\(t.name)'"))
+                }
+            } else {
+                // Die Rollen eines Linux-Spiels gibt es je einmal; wohin sie gehören, weiß die Toolchain.
+                guard roles.insert(t.role).inserted else {
+                    throw RecipeError.invalid(L("folder role '\(t.role.rawValue)' appears twice", "Ordnerrolle '\(t.role.rawValue)' kommt doppelt vor"))
+                }
+                guard t.dest == nil else {
+                    throw RecipeError.invalid(L("'\(t.name)': only a data folder has a destination", "'\(t.name)': einen Zielordner hat nur ein Datenordner"))
+                }
+            }
+            if let only = t.only {
+                guard !only.isEmpty, only.allSatisfy(Recipe.isSafeName), Set(only).count == only.count else {
+                    throw RecipeError.invalid(L("contents of '\(t.name)'", "Inhalt von '\(t.name)'"))
+                }
             }
             // Ohne Kenndatei wäre jeder beliebige Ordner „der richtige“.
             guard !t.markers.isEmpty else { throw RecipeError.invalid(L("'\(t.name)': no marker file", "'\(t.name)': keine Kenndatei")) }

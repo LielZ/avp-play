@@ -411,7 +411,8 @@ public struct Installer: Sendable {
         }
         let items = StagePlan.plan(local: local, remote: remote)
         let staged = local.filter { StagePlan.destination(for: $0.file) != nil }.count
-        let hasTrees = recipe.trees?.isEmpty == false
+        // Gemeint sind hier die Bäume eines Spiels, das kein APK ist; Datenordner eines APK-Spiels folgen weiter unten.
+        let hasTrees = !TreeStore.toolchainTrees(of: recipe).isEmpty
         if staged > 0 || !hasTrees {
             let total = Installer.gigabytes(items.map(\.size).reduce(0, +))
             report(L("Data: \(staged) files belong on the device, \(staged - items.count) are already there, "
@@ -464,7 +465,7 @@ public struct Installer: Sendable {
             let totalBytes = want.values.reduce(0, +)
             let polling = StopFlag()
             defer { polling.stop() }
-            pollTreeProgress(device: device, bundle: bundle, total: totalBytes, until: polling)
+            pollTreeProgress(device: device, bundle: bundle, subdirectory: Installer.treeDestination, total: totalBytes, until: polling)
             // Bei stundenlangen Übertragungen reißt die Verbindung gelegentlich ab (das Gerät schläft ein, ein Socket
             // schließt). Der Abgleich ist wiederholbar – was schon drüben ist, lässt devicectl aus –, also geht es
             // nach einer Pause weiter, statt den Auftrag anzuhalten. Nur Abbrüche der Übertragung werden wiederholt;
@@ -487,6 +488,8 @@ public struct Installer: Sendable {
             progress(InstallProgress(step: .stage, done: totalBytes, total: totalBytes))
             report(String(format: L("Game data synced (%.0f s).", "Spieldaten abgeglichen (%.0f s)."), Date().timeIntervalSince(started)))
         }
+
+        try stageDataTrees(device: device, bundle: bundle)
 
         // Assets aus dem APK: als Ordner, wenn Anzahl oder Gesamtgröße abweichen. Der entpackte Baum entsteht
         // beim Build; fehlt er (Kopieren ohne vorherigen Build mit dieser Toolchain), wird er hier angelegt.
@@ -521,21 +524,100 @@ public struct Installer: Sendable {
         }
     }
 
+    /// Datenordner eines APK-Spiels (Rolle `data`): Jeder gehört als Ganzes an seinen Ort unter `Documents/`.
+    ///
+    /// Übertragen wird in einem Zug, als Ordner – Datei für Datei bräuchte bei einigen tausend Dateien Stunden. Dafür
+    /// entsteht im Bestand ein Abbild aus Links, das nur enthält, was drüben fehlt; `devicectl` legt es über den
+    /// Zielordner, und was dort sonst liegt, bleibt. Ist alles drüben, kommt eine leere Kenndatei dazu, deren Name
+    /// die Fassung des Baums trägt: Von da an gilt der Ordner als vollständig, und es wird nur noch ergänzt, was fehlt.
+    func stageDataTrees(device: Device, bundle: String) throws {
+        let fm = FileManager.default
+        let treeStore = TreeStore(store: store)
+        for tree in TreeStore.dataTrees(of: recipe) {
+            guard let dest = tree.dest else { continue }
+            let directory = "Documents/\(dest)"
+            let source = treeStore.url(for: tree, in: recipe)
+            let local = TreeStore.listing(of: source)
+            guard !local.isEmpty else { throw InstallError.missingTrees([tree.name], recipe: recipe.id) }
+            var remote: [String: Int64] = [:]
+            for f in try control.files(device: device, bundle: bundle, subdirectory: directory, recursive: true) where !f.isDirectory {
+                remote[f.relativePath] = f.size
+            }
+            let stamp = tree.deviceStampName
+            let settled = remote[stamp] != nil
+            var needed = StagePlan.missing(ofTree: local, remote: remote, settled: settled)
+            // Die rekursive Liste des Geräts ist bei großen Bäumen nicht immer vollständig. Bevor in einem Ordner, der
+            // als vollständig gilt, etwas ersetzt wird, das womöglich nur in der Liste fehlt, wird dort einzeln nachgesehen.
+            if settled, !needed.isEmpty {
+                let parents = Set(needed.keys.map { ($0 as NSString).deletingLastPathComponent })
+                if parents.count <= 40 {
+                    for parent in parents {
+                        let sub = parent.isEmpty ? directory : "\(directory)/\(parent)"
+                        for f in try control.files(device: device, bundle: bundle, subdirectory: sub) where !f.isDirectory {
+                            needed[parent.isEmpty ? f.relativePath : "\(parent)/\(f.relativePath)"] = nil
+                        }
+                    }
+                }
+            }
+            let bytes = needed.values.reduce(0, +)
+            let total = Installer.gigabytes(local.values.reduce(0, +))
+            guard !needed.isEmpty else {
+                if !settled { try markSettled(tree, directory: directory, device: device, bundle: bundle) }
+                report(L("Game data “\(tree.name)”: \(local.count) files (\(total)) are already on the device.",
+                         "Spieldaten „\(tree.name)“: \(local.count) Dateien (\(total)) liegen schon auf dem Gerät."))
+                continue
+            }
+            report(L("Game data “\(tree.name)”: \(local.count) files (\(total)) belong on the device, \(needed.count) to copy (\(Installer.gigabytes(bytes))) …",
+                     "Spieldaten „\(tree.name)“: \(local.count) Dateien (\(total)) gehören aufs Gerät, \(needed.count) zu kopieren (\(Installer.gigabytes(bytes))) …"))
+
+            let mirror = store.directory(for: recipe).appendingPathComponent(".stage-\(tree.name)", isDirectory: true)
+            try? fm.removeItem(at: mirror)
+            defer { try? fm.removeItem(at: mirror) }
+            for path in needed.keys.sorted() {
+                let from = source.appendingPathComponent(path), to = mirror.appendingPathComponent(path)
+                try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                // Ein Link kostet keinen Platz; wo er nicht geht, tut es eine Kopie (auf APFS ein Klon).
+                do { try fm.linkItem(at: from, to: to) } catch { try fm.copyItem(at: from, to: to) }
+            }
+            let started = Date()
+            let polling = StopFlag()
+            defer { polling.stop() }
+            progress(InstallProgress(step: .stage, done: 0, total: bytes))
+            pollTreeProgress(device: device, bundle: bundle, subdirectory: directory, total: bytes,
+                             baseline: remote.values.reduce(0, +), until: polling)
+            try copyWithRetry(StageItem(source: mirror, destination: directory, size: bytes), to: device, bundle: bundle)
+            polling.stop()
+            progress(InstallProgress(step: .stage, done: bytes, total: bytes))
+            if !settled { try markSettled(tree, directory: directory, device: device, bundle: bundle) }
+            report(String(format: L("Game data “\(tree.name)” copied (%.0f s).", "Spieldaten „\(tree.name)“ kopiert (%.0f s)."),
+                          Date().timeIntervalSince(started)))
+        }
+    }
+
+    /// Legt die Kenndatei in den Zielordner: Dieser Baum liegt in dieser Fassung vollständig auf dem Gerät.
+    func markSettled(_ tree: RecipeTree, directory: String, device: Device, bundle: String) throws {
+        let note = FileManager.default.temporaryDirectory.appendingPathComponent("avpplay-stamp-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: note) }
+        try Data("AVP Play: \(recipe.id) \(tree.name)\n".utf8).write(to: note)
+        try control.copy(note, to: device, bundle: bundle, destination: "\(directory)/\(tree.deviceStampName)")
+    }
+
     /// Wo die Toolchain die Ordnerbestände auf dem Gerät ablegt (siehe stage_sync.py: `<container>/Documents/lx`).
     static let treeDestination = "Documents/lx"
 
-    /// Fragt das Gerät während eines Ordnerabgleichs alle halbe Minute, wie viel unter `Documents/lx` liegt, und
-    /// meldet das als Fortschritt – bis `until` gesetzt ist. Eine Abfrage, die während der Übertragung scheitert,
+    /// Fragt das Gerät während eines Ordnerabgleichs alle halbe Minute, wie viel unter einem Ordner liegt (abzüglich
+    /// dessen, was dort schon vorher lag), und meldet das als Fortschritt – bis `until` gesetzt ist. Eine Abfrage, die während der Übertragung scheitert,
     /// wird übergangen; die nächste kommt ohnehin. Die rekursive Liste des Geräts kann bei großen Bäumen unvollständig
     /// sein; der Balken zeigt dann eher zu wenig als zu viel.
-    func pollTreeProgress(device: Device, bundle: String, total: Int64, every seconds: TimeInterval = 30, until stop: StopFlag) {
+    func pollTreeProgress(device: Device, bundle: String, subdirectory: String, total: Int64, baseline: Int64 = 0,
+                          every seconds: TimeInterval = 30, until stop: StopFlag) {
         guard total > 0 else { return }
         let control = self.control, progress = self.progress
         Thread.detachNewThread {
             Thread.sleep(forTimeInterval: 5)
             while !stop.isSet {
-                if let files = try? control.files(device: device, bundle: bundle, subdirectory: Installer.treeDestination, recursive: true) {
-                    let done = files.filter { !$0.isDirectory }.reduce(Int64(0)) { $0 + $1.size }
+                if let files = try? control.files(device: device, bundle: bundle, subdirectory: subdirectory, recursive: true) {
+                    let done = max(0, files.filter { !$0.isDirectory }.reduce(Int64(0)) { $0 + $1.size } - baseline)
                     if !stop.isSet { progress(InstallProgress(step: .stage, done: min(done, total), total: total)) }
                 }
                 for _ in 0..<Int(seconds * 2) where !stop.isSet { Thread.sleep(forTimeInterval: 0.5) }
