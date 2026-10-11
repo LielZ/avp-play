@@ -16,6 +16,8 @@ public enum AppleRefusal: String, Codable, Sendable, CaseIterable {
     case identifierTaken
     /// Xcode ist bei Apple nicht (mehr) angemeldet.
     case accountSession
+    /// Xcodes Bauwerkzeug findet auf diesem Mac gar kein Apple-Konto – auch wenn Xcode selbst eines zeigt.
+    case noAccount
     /// Apple wartet auf die Zustimmung zu geänderten Bedingungen.
     case agreement
     /// Das Bereitstellungsprofil gilt nicht (mehr) für diese App auf diesem Gerät.
@@ -47,6 +49,11 @@ public enum AppleMessages {
         (.capability, #"personal development teams?[^\n]{0,200}do(es)? not support|personal team[^\n]{0,200}(isn't|is not) eligible"#),
         (.identifierTaken, #"cannot be registered to your development team because it is not available|failed to register bundle identifier"#),
         (.agreement, #"program license agreement|agreement[^\n]{0,80}(has been updated|must be (accepted|agreed)|needs to be (accepted|reviewed))|pla update available"#),
+        // So meldet es `xcodebuild`, wenn es kein einziges Konto sieht (Protokoll eines Nutzers mit kostenlosem Team,
+        // 2026-10-11). In Xcode stand das Konto dabei als angemeldet; die Teamliste in Xcodes Einstellungen, aus
+        // der die App liest, war ebenfalls da. Abmelden und neu anmelden in Xcode hat es behoben, der nächste Bau
+        // lief durch – deshalb nennt der Rat genau diesen Handgriff.
+        (.noAccount, #"no accounts: add a new account"#),
         (.accountSession, #"your session has expired|no account for team|unable to log in with account|log in to your account|please sign in (again )?(with|to) (an|your) apple"#),
         (.notTrusted, #"has not been explicitly trusted by the user|untrusted developer"#),
         (.profile, #"a valid provisioning profile for this executable was not found|provisioning profile[^\n]{0,120}(has expired|is expired|expired on)|profile has expired"#),
@@ -91,6 +98,9 @@ public enum AppleMessages {
         case .accountSession:
             return L("Xcode is no longer signed in to your Apple account. Open Xcode › Settings › Accounts, sign in again, then choose “Resume”.",
                      "Xcode ist nicht mehr bei deinem Apple-Konto angemeldet. Öffne Xcode › Einstellungen › Accounts, melde dich neu an und wähle dann „Fortsetzen“.")
+        case .noAccount:
+            return L("Xcode's build tool finds no Apple account on this Mac, so it cannot sign the game. Open Xcode › Settings › Accounts and add your Apple account. If it is already listed there, sign out and sign in again – an account can be shown as signed in and still not be usable for building. Then choose “Resume”.",
+                     "Xcodes Bauwerkzeug findet auf diesem Mac kein Apple-Konto und kann das Spiel deshalb nicht signieren. Öffne Xcode › Einstellungen › Accounts und füge dein Apple-Konto hinzu. Steht es dort schon, melde dich ab und wieder an – ein Konto kann als angemeldet angezeigt werden und trotzdem nicht zum Bauen taugen. Wähle dann „Fortsetzen“.")
         case .notTrusted:
             return L("The Vision Pro does not trust this developer yet. On the headset, open Settings › General › VPN & Device Management, choose your Apple account and confirm “Trust”. This is needed once per account.",
                      "Die Vision Pro vertraut diesem Entwickler noch nicht. Öffne auf dem Headset Einstellungen › Allgemein › VPN & Geräteverwaltung, wähle dein Apple-Konto und bestätige „Vertrauen“. Das ist einmal je Konto nötig.")

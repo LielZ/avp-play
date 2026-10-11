@@ -18,6 +18,9 @@ final class AppleRefusalTests: XCTestCase {
             ("error: Failed to register bundle identifier: The app identifier \"a.b.c\" cannot be registered to your development team because it is not available.", .identifierTaken),
             ("error: No Account for Team \"A1B2C3D4E5\". Add a new account in Accounts settings", .accountSession),
             ("xcodebuild: error: Unable to log in with account 'x'. Your session has expired. Please log in.", .accountSession),
+            // As xcodebuild printed it for a user whose Xcode showed the account as signed in (2026-10-11): again two
+            // errors, and the one about the missing profile comes last.
+            ("Klepton.xcodeproj: error: No Accounts: Add a new account in Accounts settings. (in target 'Klepton' from project 'Klepton')\nKlepton.xcodeproj: error: No profiles for 'me.team.dev.klepton.target.game' were found: Xcode couldn't find any iOS App Development provisioning profiles matching 'me.team.dev.klepton.target.game'. (in target 'Klepton' from project 'Klepton')\n** BUILD FAILED **", .noAccount),
             ("The Apple Developer Program License Agreement has been updated and needs to be reviewed.", .agreement),
             ("Unable to launch because it has an invalid code signature, inadequate entitlements or its profile has not been explicitly trusted by the user.", .notTrusted),
             ("!! install FAILED: A valid provisioning profile for this executable was not found.", .profile),
