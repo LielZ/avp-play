@@ -11,6 +11,9 @@ final class AppleRefusalTests: XCTestCase {
             ("[4/5] installing…\n               LegacyErrorString = ApplicationVerificationFailed\n               LibMISErrorNumber = -402620383\n  install failed — once more in 5 s", .tooManyApps),
             ("!! install FAILED:                FunctionName = -[MIFreeProfileValidatedAppTracker _onQueue_addReferenceForApplicationIdentifier:bundle:error:]", .tooManyApps),
             ("error: Communication with Apple failed: Your maximum App ID limit has been reached. You may create up to 10 App IDs every 7 days.", .tooManyAppIds),
+            // As xcodebuild printed it for the eleventh identifier of a free team within a week (Xcode 27.1, 2026-10-11):
+            // two errors, and the one about the missing profile must not hide the reason for it.
+            ("Klepton.xcodeproj: error: Communication with Apple failed. Your maximum App ID limit has been reached. You may create up to 10 App IDs every 7 days. (in target 'Klepton' from project 'Klepton')\nKlepton.xcodeproj: error: No profiles for 'me.team.dev.klepton.target.game' were found: Xcode couldn't find any iOS App Development provisioning profiles matching 'me.team.dev.klepton.target.game'. (in target 'Klepton' from project 'Klepton')\n** BUILD FAILED **", .tooManyAppIds),
             ("error: Personal development teams, including \"Jane Appleseed\", do not support the Extended Virtual Addressing capability.", .capability),
             ("error: Failed to register bundle identifier: The app identifier \"a.b.c\" cannot be registered to your development team because it is not available.", .identifierTaken),
             ("error: No Account for Team \"A1B2C3D4E5\". Add a new account in Accounts settings", .accountSession),

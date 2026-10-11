@@ -1424,8 +1424,11 @@ final class OwnershipCacheTests: XCTestCase {
 
 final class BundleNamingTests: XCTestCase {
     func testPrefixAndIdentifier() {
-        XCTAssertEqual(Toolchain.defaultBundlePrefix(user: "Anna Maria"), "annamaria.dev.klepton.target")
-        XCTAssertEqual(Toolchain.defaultBundlePrefix(user: "…"), "user.dev.klepton.target")
+        // As the toolchain forms it (visionos/targets.py): what is not a letter, digit or hyphen becomes a hyphen;
+        // a name of which nothing is left stands for no name. Until 1.0.15 such characters were dropped here, and
+        // the two sides disagreed about where the app was (issue 10).
+        XCTAssertEqual(Toolchain.defaultBundlePrefix(user: "Anna Maria"), "anna-maria.dev.klepton.target")
+        XCTAssertEqual(Toolchain.defaultBundlePrefix(user: "…"), "dev.klepton.target")
         XCTAssertEqual(Toolchain.bundleId(target: "moss", prefix: nil), Toolchain.defaultBundleId(target: "moss"))
         XCTAssertEqual(Toolchain.bundleId(target: "moss", prefix: ""), Toolchain.defaultBundleId(target: "moss"))
         XCTAssertEqual(Toolchain.bundleId(target: "moss", prefix: "com.example.games"), "com.example.games.moss")

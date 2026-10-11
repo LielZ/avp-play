@@ -54,6 +54,19 @@ final class AppleTeamsTests: XCTestCase {
         XCTAssertEqual(Toolchain.defaultBundlePrefix(user: "Jane", freeTeam: ""), "jane.dev.klepton.target")
     }
 
+    /// The toolchain builds the identifier in Python (`re.sub(r"[^A-Za-z0-9-]", "-", user).strip("-").lower()`) and
+    /// this library has to arrive at the same string, or it looks for an app the toolchain installed under
+    /// another name (issue 10: a user name with an underscore).
+    func testTheBundleScopeIsTheToolchains() {
+        for (user, scope) in [("marc_intosh", "marc-intosh"), ("Jane", "jane"), ("john.doe", "john-doe"),
+                              ("_x_", "x"), ("müller", "m-ller"), ("a b", "a-b"), ("r2-d2", "r2-d2"), ("___", "")] {
+            XCTAssertEqual(Toolchain.bundleScope(user: user), scope, user)
+        }
+        XCTAssertEqual(Toolchain.defaultBundleId(target: "moss", user: "marc_intosh"), "marc-intosh.dev.klepton.target.moss")
+        XCTAssertEqual(Toolchain.defaultBundlePrefix(user: "marc_intosh", freeTeam: "Z9Y8X7W6V5"), "marc-intosh.z9y8x7w6v5.dev.klepton.target")
+        XCTAssertEqual(Toolchain.defaultBundleId(target: "moss", user: "___"), "dev.klepton.target.moss")
+    }
+
     func testAFreeInstallRemindsTwoDaysBeforeAndAPaidOneThirty() {
         let expires = Date(timeIntervalSince1970: 1_800_000_000)
         let free = SigningRecord(team: "Z9Y8X7W6V5", free: true, installed: expires.addingTimeInterval(-7 * 86_400), expires: expires)

@@ -87,8 +87,7 @@ public struct Toolchain: Sendable {
 
     /// Die Bundle-ID, unter der die Toolchain ein Target baut, sofern keine andere vorgegeben wird.
     public static func defaultBundleId(target: String, user: String = NSUserName()) -> String {
-        let scope = user.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
-        return "\(scope.isEmpty ? "user" : scope).dev.klepton.target.\(target)"
+        "\(defaultBundlePrefix(user: user)).\(target)"
     }
 
     /// Legt APK und entpackten Baum dort ab, wo die Toolchain sie erwartet. Der Baum entsteht frisch aus dem

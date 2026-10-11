@@ -115,8 +115,9 @@ public enum AppleMessages {
          L("At most \(freeAppIdsPerWeek) different games can be set up within \(freeSigningDays) days.",
            "Höchstens \(freeAppIdsPerWeek) verschiedene Spiele lassen sich innerhalb von \(freeSigningDays) Tagen neu anlegen."),
          // Von den drei Berechtigungen der Toolchain gibt Apple kostenlosen Konten eine (mehr Arbeitsspeicher) und
-         // zwei nicht. Genannt wird nur die, die ein Spiel betrifft: mehr Adressraum. Die andere, verzögerungsarmes
-         // Streaming, braucht keines der Spiele im Katalog.
+         // zwei nicht. Genannt wird nur die, die Spiele betrifft: mehr Adressraum. Die andere, verzögerungsarmes
+         // Streaming, verlangt nur der Bau von Steam Link; ob sie dort etwas bewirkt, ist nicht belegt (der Schlüssel
+         // kam beim Suchen nach einem Streaming-Fehler dazu, siehe gen_xcodeproj.py der Toolchain).
          // Nachgesehen an den signierten Bauten vom 2026-10-11: mit dem kostenlosen Team steht genau
          // increased-memory-limit in der Signatur, mit dem bezahlten stehen alle drei darin.
          L("The permission for more memory, which large games need, is there with a free account too. Only the one for more address space is missing; a very large game may fail to start because of it.",
