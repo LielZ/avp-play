@@ -64,7 +64,8 @@ enum AccountState: Equatable {
 }
 
 enum AppSection: String, CaseIterable, Identifiable {
-    case games, jobs, data, setup
+    /// Die Einstellungen stehen als letzter Punkt in der Seitenleiste, nicht in einem eigenen Fenster.
+    case games, jobs, data, setup, settings
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -72,6 +73,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .jobs: return L("Jobs", "Aufträge")
         case .data: return L("Data", "Datenverwaltung")
         case .setup: return L("Setup", "Einrichtung")
+        case .settings: return L("Settings", "Einstellungen")
         }
     }
     var symbol: String {
@@ -80,6 +82,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .jobs: return "list.bullet.clipboard"
         case .data: return "externaldrive"
         case .setup: return "checklist"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -208,6 +211,16 @@ final class AppModel: ObservableObject {
     let storeMoveStop = StopFlags()
     private var runningTask: Task<Void, Never>?
     private var stopRequested: Set<String> = []
+    /// Die in der Übersicht angehakten Spiele, und ob gerade ein Sammelauftrag für sie vorbereitet wird.
+    @Published var selection: Set<String> = []
+    @Published var bulkBusy = false
+    /// Der Hintergrunddienst, der ablaufende Signaturen erneuert: ob er eingetragen sein soll, in welchem Abstand
+    /// er prüft, und was der letzte Lauf ergab.
+    @AppStorage("renewInBackground") var renewInBackground = false
+    @AppStorage("renewIntervalHours") var renewIntervalHours = BackgroundService.defaultInterval
+    @Published var renewalReport: RenewalReport? = RenewalReport.load()
+    @Published var renewalNote: String?
+    @Published var renewing = false
 
     init() {
         applyLanguage()
@@ -378,7 +391,9 @@ final class AppModel: ObservableObject {
     }
 
     /// Das Präfix, unter dem die Spiele installiert werden: das gewählte, sonst der Standard.
-    var bundlePrefix: String { customBundlePrefix.isEmpty ? Toolchain.defaultBundlePrefix() : customBundlePrefix }
+    var bundlePrefix: String {
+        customBundlePrefix.isEmpty ? Toolchain.defaultBundlePrefix(freeTeam: team?.free == true ? teamId : nil) : customBundlePrefix
+    }
 
     var teamValid: Bool { teamId.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil }
     /// Das gewählte Team, soweit Xcode es kennt.
@@ -400,13 +415,16 @@ final class AppModel: ObservableObject {
             return L("This game is not in your Meta account, so nothing is downloaded.",
                      "Dieses Spiel gehört nicht zu deinem Meta-Konto. Es wird nichts geladen.")
         }
+        if let why = freeAccountBlocker(for: game) { return why }
         if !game.status.userProvidedMissing.isEmpty { return L("Files that you provide yourself are missing (see below).", "Es fehlen Dateien, die du selbst bereitstellst (siehe unten).") }
         if let extra = missingExtras(for: game).first {
             let name = extra.title?.text ?? extra.name
             return L("“\(name)” is ticked but not on this Mac yet (see “Optional Content”).",
                      "„\(name)“ ist angehakt, liegt aber noch nicht auf diesem Mac (siehe „Wählbare Inhalte“).")
         }
-        if let t = toolchain, !t.satisfies(minCommit: game.recipe.toolchain.minCommit) {
+        // Ein Entwurf, der ohne Toolchain nachgeschlagen wurde, nennt noch keinen Mindeststand; der wird beim Anlegen
+        // des Auftrags eingesetzt.
+        if let t = toolchain, !game.recipe.toolchain.minCommit.isEmpty, !t.satisfies(minCommit: game.recipe.toolchain.minCommit) {
             return L("This game needs a newer toolchain than the one installed.", "Dieses Spiel braucht eine neuere Toolchain als die installierte.")
         }
         if isBusy(game.id) { return L("A job for this game is already running.", "Für dieses Spiel läuft schon ein Auftrag.") }
@@ -684,8 +702,9 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    /// Ob es für das Spiel etwas gibt, das das Programm selbst laden kann und das noch fehlt.
-    func hasDownloads(_ game: Game) -> Bool { game.status.bytesToDownload > 0 }
+    /// Ob es für das Spiel etwas gibt, das das Programm selbst laden kann und das noch fehlt. Gezählt werden die
+    /// Dateien, nicht ihre Größe: bei einem nachgeschlagenen Spiel aus dem Meta-Store kennt die vorab niemand.
+    func hasDownloads(_ game: Game) -> Bool { game.status.filesToDownload > 0 || game.status.bytesToDownload > 0 }
 
     /// Lädt die Dateien des Spiels, ohne es zu bauen oder zu installieren.
     func download(_ game: Game) {
@@ -743,11 +762,21 @@ final class AppModel: ObservableObject {
         enqueue(game, steps: InstallStep.contentSync)
     }
 
-    private func enqueue(_ game: Game, steps: [InstallStep], addons: Bool? = nil) {
+    /// - Parameter show: zur Seite „Aufträge“ wechseln und den neuen Auftrag zeigen. Ein Sammelauftrag tut das
+    ///   einmal am Ende, nicht für jedes Spiel.
+    func enqueue(_ game: Game, steps: [InstallStep], addons: Bool? = nil, show: Bool = true) {
         // Nur wer baut oder aufs Gerät kopiert, braucht die Toolchain.
         let downloadOnly = steps == InstallStep.download
         let toolchain = toolchain
         guard toolchain != nil || downloadOnly else { return }
+        // Ein Entwurf, der ohne Toolchain nachgeschlagen wurde: Jetzt, wo gebaut wird, steht fest, mit welchem Stand.
+        var recipe = game.recipe
+        if game.draft, recipe.toolchain.minCommit.isEmpty, !downloadOnly, let toolchain {
+            recipe = DraftRecipe.retargeted(recipe, target: recipe.toolchain.target, minCommit: toolchain.commit())
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+            try? encoder.encode(recipe).write(to: draftsDirectory.appendingPathComponent("\(recipe.id).json"), options: .atomic)
+        }
         var request = InstallRequest(toolchain: toolchain?.root.path ?? "")
         if downloadOnly { request.downloadOnly = true }
         request.team = teamId
@@ -756,15 +785,19 @@ final class AppModel: ObservableObject {
         request.locales = chosen.locales
         request.optionalNames = chosen.optionalNames
         request.addons = addons ?? chosen.addons
-        if !customBundlePrefix.isEmpty { request.bundleId = "\(customBundlePrefix).\(game.recipe.toolchain.target)" }
+        // Ein eigenes Präfix oder das eines kostenlosen Teams: dann steht die Kennung im Auftrag.
+        let prefix = bundlePrefix
+        if prefix != Toolchain.defaultBundlePrefix() { request.bundleId = "\(prefix).\(game.recipe.toolchain.target)" }
         do {
             // Eingefroren wird der Stand, mit dem der Auftrag beginnt.
-            let job = Job(recipe: game.recipe, request: request, steps: steps, toolchainCommit: toolchain?.commit() ?? "")
+            let job = Job(recipe: recipe, request: request, steps: steps, toolchainCommit: toolchain?.commit() ?? "")
             try paths.jobs.save(job)
             queued.append(job.id)
             reloadJobs()
-            selectedJob = job.id
-            section = .jobs
+            if show {
+                selectedJob = job.id
+                section = .jobs
+            }
             pump()
         } catch {
             notice = "\(error)"

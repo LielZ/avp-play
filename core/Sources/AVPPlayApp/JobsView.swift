@@ -134,7 +134,7 @@ struct JobDetail: View {
                             .fixedSize(horizontal: false, vertical: true)
                         HStack {
                             switch job.failureKind ?? .other {
-                            case .signIn, .setup:
+                            case .signIn, .setup, .apple:
                                 Button(L("Open Setup", "Einrichtung öffnen")) { model.section = .setup }
                             case .ownFiles, .notOwned:
                                 Button(L("Open Game Page", "Seite des Spiels öffnen")) {
@@ -232,6 +232,12 @@ struct JobDetail: View {
                      "Es fehlen Dateien, die du selbst bereitstellst. Die Seite des Spiels nennt sie und lässt dich den Ordner wählen.")
         case .setup:
             return L("Something in “Setup” is missing or has changed.", "In der „Einrichtung“ fehlt etwas oder hat sich geändert.")
+        case .apple:
+            return model.team?.free == true
+                ? L("This comes from Apple, not from the game: you are signing with a free Apple account, and it has limits. “Setup” lists them under “Apple Developer Team”.",
+                    "Das kommt von Apple, nicht vom Spiel: Du signierst mit einem kostenlosen Apple-Konto, und das hat Grenzen. Unter „Einrichtung“ stehen sie beim „Apple-Entwicklerteam“.")
+                : L("This comes from Apple, not from the game. The text above says what Apple wants; afterwards “Resume” continues.",
+                    "Das kommt von Apple, nicht vom Spiel. Der Text oben sagt, was Apple verlangt; danach geht es mit „Fortsetzen“ weiter.")
         case .unsupported:
             return L("There is nothing to resume: this app cannot run here. Games built on Unity or Unreal are the ones worth trying.",
                      "Hier gibt es nichts fortzusetzen: Diese App kann hier nicht laufen. Einen Versuch wert sind Spiele, die auf Unity oder Unreal gebaut sind.")

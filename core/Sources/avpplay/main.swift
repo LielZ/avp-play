@@ -106,6 +106,7 @@ avpplay – command line for the AVP Play core library
   avpplay toolchain install <archive>          check and install a package
   avpplay install <id> --team <team ID>        build, install, copy missing data, unlock add-on content
   avpplay stage <id>                           only copy missing data and add-on content (no build)
+  avpplay renew [--dry-run]                    sign installed games again whose signature runs out soon (what the background service does)
   avpplay job start <id> --team <team ID>      job: check, download, build, install, copy, unlock
   avpplay job resume <job>                     resume an interrupted or stopped job
   avpplay job show|cancel <job>                show progress / cancel            avpplay jobs   all jobs
@@ -149,6 +150,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay toolchain install <Archiv>           Paket prüfen und installieren
   avpplay install <id> --team <Team-ID>        bauen, installieren, Daten ergänzend kopieren, Zusatzinhalte freischalten
   avpplay stage <id>                           nur Daten und Zusatzinhalte ergänzend kopieren (ohne Build)
+  avpplay renew [--dry-run]                    installierte Spiele neu signieren, deren Signatur bald abläuft (was der Hintergrunddienst tut)
   avpplay job start <id> --team <Team-ID>      Auftrag: prüfen, laden, bauen, installieren, kopieren, freischalten
   avpplay job resume <Auftrag>                 unterbrochenen oder angehaltenen Auftrag fortsetzen
   avpplay job show|cancel <Auftrag>            Stand zeigen / abbrechen          avpplay jobs   alle Aufträge
@@ -600,6 +602,18 @@ case "toolchains":
         print(L("Version \(m.version) (\(m.commit)), created \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)",
                 "Version \(m.version) (\(m.commit)), erstellt \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)"))
     }
+
+case "renew":
+    let chosen = (o.value("toolchain") ?? ProcessInfo.processInfo.environment["AVPPLAY_TOOLCHAIN"]).flatMap { try? Toolchain(root: URL(fileURLWithPath: $0)) }
+    let dry = o.flags.contains("dry-run")
+    let report = await Renewal.run(recipes: Renewal.recipes(bundled: recipesDirectory(o), drafts: DataLocation.base.appendingPathComponent("drafts", isDirectory: true)),
+                                   store: contentStore(o), toolchain: chosen ?? toolchainPackager(o).installed().first,
+                                   preferredDevice: o.value("device"), dryRun: dry, log: { print($0) })
+    if !dry { report.save() }
+    print(report.outcomes.isEmpty
+        ? L("Nothing is due (\(report.known) installation(s) with a known date).", "Nichts fällig (\(report.known) Installation(en) mit bekanntem Datum).")
+        : L("\(report.outcomes.count) due: \(report.outcomes.filter { $0.result == .renewed }.count) renewed, \(report.outcomes.filter { $0.result == .failed }.count) failed, the rest not tried.",
+            "\(report.outcomes.count) fällig: \(report.outcomes.filter { $0.result == .renewed }.count) erneuert, \(report.outcomes.filter { $0.result == .failed }.count) gescheitert, der Rest nicht versucht."))
 
 case "toolchain":
     guard o.positional.count >= 2 else {

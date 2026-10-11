@@ -14,7 +14,8 @@ enum LanguageChoice: String, CaseIterable, Identifiable {
     }
 }
 
-/// Die Einstellungen des Programms (⌘,): Sprache und, für Leute die es brauchen, die Kennung der Apps.
+/// Die Einstellungen des Programms (⌘,), als letzte Seite des Hauptfensters: Sprache, Katalog, Downloads, das
+/// Erneuern der Signaturen und, für Leute die es brauchen, die Kennung der Apps.
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @State private var prefixDraft = ""
@@ -29,6 +30,8 @@ struct SettingsView: View {
                        "Menüs, die macOS selbst stellt, wechseln beim nächsten Öffnen des Programms."))
                     .font(.callout).foregroundStyle(.secondary)
             }
+
+            RenewalSettings()
 
             Section(L("Online catalogue", "Online-Katalog")) {
                 Toggle(L("Show more games from the online catalogue and allow feedback", "Weitere Spiele aus dem Online-Katalog zeigen und Rückmeldungen erlauben"),
@@ -139,9 +142,13 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear { prefixDraft = model.customBundlePrefix }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
+        .navigationTitle(L("Settings", "Einstellungen"))
+        .onAppear {
+            prefixDraft = model.customBundlePrefix
+            model.renewalReport = RenewalReport.load()
+        }
     }
 
     private func applyPrefix() {

@@ -4,9 +4,15 @@ import Foundation
 extension Toolchain {
     /// Das Präfix ohne eigene Vorgabe: der Benutzername am Mac und die feste Endung der Toolchain.
     /// `defaultBundleId(target:)` ist dieses Präfix mit angehängtem Target.
-    public static func defaultBundlePrefix(user: String = NSUserName()) -> String {
+    ///
+    /// Mit einem kostenlosen Team steht dessen Kennung mit im Präfix. Eine App-Kennung gehört genau einem Team:
+    /// Wer später die bezahlte Mitgliedschaft abschließt, bekommt ein anderes Team, und dem verweigert Apple
+    /// die Kennungen, die das kostenlose schon registriert hat. Bezahlte Teams behalten das bisherige Präfix –
+    /// sonst verlören bestehende Installationen ihre Daten.
+    public static func defaultBundlePrefix(user: String = NSUserName(), freeTeam: String? = nil) -> String {
         let scope = user.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
-        return "\(scope.isEmpty ? "user" : scope).dev.klepton.target"
+        let team = (freeTeam ?? "").lowercased().filter { $0.isLetter || $0.isNumber }
+        return "\(scope.isEmpty ? "user" : scope)\(team.isEmpty ? "" : ".\(team)").dev.klepton.target"
     }
 
     /// Die Kennung eines Targets unter einem Präfix; ohne Präfix die übliche.

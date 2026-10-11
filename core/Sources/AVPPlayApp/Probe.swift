@@ -23,12 +23,7 @@ enum Probe {
     }
 
     /// Ein Entwicklerteam, wie Xcode es kennt.
-    struct Team: Identifiable, Hashable, Sendable {
-        let id: String
-        let name: String
-        /// Kostenloses „Personal Team“: Apps laufen nur sieben Tage, und nötige Berechtigungen fehlen.
-        let free: Bool
-    }
+    typealias Team = AppleTeam
 
     static func run(paths: Paths, bundlePrefix: String, preferredDevice: String? = nil) -> Snapshot {
         var s = Snapshot()
@@ -138,19 +133,8 @@ enum Probe {
     /// ist. Gelesen wird nur diese Liste aus Xcodes Einstellungen, keine Kontodaten. Kennt Xcode keine Teams,
     /// bleiben die Kennungen aus den Entwicklerzertifikaten – ein Vorschlag, keine Prüfung.
     static func teams() -> [Team] {
-        var found: [Team] = []
-        let exported = capture(["/usr/bin/defaults", "export", "com.apple.dt.Xcode", "-"]).out
-        if let plist = try? PropertyListSerialization.propertyList(from: Data(exported.utf8), format: nil) as? [String: Any],
-           let byAccount = plist["IDEProvisioningTeamByIdentifier"] as? [String: Any] {
-            for case let list as [[String: Any]] in byAccount.values {
-                for entry in list {
-                    guard let id = entry["teamID"] as? String, !found.contains(where: { $0.id == id }) else { continue }
-                    found.append(Team(id: id, name: entry["teamName"] as? String ?? id,
-                                      free: (entry["isFreeProvisioningTeam"] as? Bool) ?? false))
-                }
-            }
-        }
-        if !found.isEmpty { return found.sorted { !$0.free && $1.free } }
+        let found = AppleTeams.known()
+        if !found.isEmpty { return found }
         return certificateTeams().map { Team(id: $0, name: L("Team \($0)", "Team \($0)"), free: false) }
     }
 

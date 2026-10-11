@@ -179,10 +179,10 @@ extension AppModel {
                                      "Melde dich zuerst unter „Einrichtung“ bei Meta an – dann kann die App prüfen, ob dir das Spiel gehört, und seine Dateien nachschlagen.")
             return
         }
-        guard let toolchain else {
-            prepareNote[game.id] = L("The toolchain is not installed yet (see “Setup”).", "Die Toolchain ist noch nicht installiert (siehe „Einrichtung“).")
-            return
-        }
+        // Die Toolchain braucht es zum Nachschlagen nicht: Wer nur laden will, hat sie vielleicht noch gar nicht (oder
+        // kein Xcode, ohne das sie nicht sagen kann, welche Spiele sie kennt). Der Entwurf nennt dann das allgemeine
+        // Versuchs-Target und noch keinen Mindeststand; beides wird nachgetragen, sobald gebaut wird.
+        let toolchain = toolchain
         preparing.insert(game.id)
         prepareNote[game.id] = L("Looking up the newest build …", "Der neueste Build wird nachgeschlagen …")
         let client = catalogClient
@@ -214,7 +214,7 @@ extension AppModel {
                 }
                 // Kennt die Toolchain das Spiel, gilt ihr Eintrag; sonst wird es mit dem allgemeinen Versuchs-Target
                 // gebaut, das sich nur nach der Engine richtet.
-                let named = detail.target.flatMap { $0.isEmpty || toolchain.targetKind($0) == nil ? nil : $0 }
+                let named = detail.target.flatMap { $0.isEmpty || toolchain?.targetKind($0) == nil ? nil : $0 }
                 let target = named ?? DraftRecipe.genericTarget(appId: entry.appId)
                 try MetaTool(url: tool).verify()
                 await say(L("Asking Meta's tool for the files of build \(build.version) …", "Metas Werkzeug wird nach den Dateien von Build \(build.version) gefragt …"))
@@ -222,7 +222,7 @@ extension AppModel {
                 try await Task.sleep(for: .seconds(5))
                 // Weitere Dateien hat nicht jedes Spiel; sagt das Werkzeug dazu nichts oder lehnt ab, bleibt es bei APK und OBB.
                 if let assets = try? MetaListing.list(.assets, buildId: build.buildId, tool: tool, token: token) { files += assets }
-                let recipe = try DraftRecipe.make(game: detail, build: build, files: files, target: target, minCommit: toolchain.commit())
+                let recipe = try DraftRecipe.make(game: detail, build: build, files: files, target: target, minCommit: toolchain?.commit() ?? "")
                 try FileManager.default.createDirectory(at: drafts, withIntermediateDirectories: true)
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.sortedKeys, .prettyPrinted]

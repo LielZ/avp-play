@@ -61,6 +61,9 @@ struct GamesView: View {
                     .padding(22)
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !model.selection.isEmpty { SelectionBar() }
+            }
             .navigationTitle(L("Games", "Spiele"))
             .searchable(text: $model.searchText, prompt: L("Search games", "Spiele suchen"))
             .onSubmit(of: .search) { model.searchCatalog() }
@@ -295,7 +298,11 @@ struct GameCard: View {
                 .overlay(alignment: .topTrailing) { TrustBadge(game: game).padding(8) }
                 .overlay(alignment: .topLeading) { FavouriteButton(game: game).padding(8) }
             VStack(alignment: .leading, spacing: 5) {
-                Text(game.recipe.title).font(.headline).lineLimit(1)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(game.recipe.title).font(.headline).lineLimit(1)
+                    Spacer(minLength: 4)
+                    SelectionMark(game: game)
+                }
                 StatusBadge(status: game.status, busy: model.isBusy(game.id))
                 OwnershipLabel(owned: model.owned(game), checking: model.checkingOwnership)
             }
@@ -304,7 +311,8 @@ struct GameCard: View {
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(hovering ? 1 : 0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(model.selection.contains(game.id) ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.separator.opacity(hovering ? 1 : 0.5)),
+                                                                 lineWidth: model.selection.contains(game.id) ? 2 : 1))
         .shadow(color: .black.opacity(hovering ? 0.22 : 0.1), radius: hovering ? 10 : 4, y: 2)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)
@@ -345,6 +353,11 @@ struct GameDetail: View {
                         if let why = blocked {
                             Text(why).font(.callout).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.trailing).frame(maxWidth: 280, alignment: .trailing)
+                        } else if model.usesFreeTeam {
+                            // Wer mit einem kostenlosen Konto signiert, soll es an der Stelle sehen, an der er installiert.
+                            Label(model.freeAccountLine, systemImage: "person.crop.circle.badge.exclamationmark")
+                                .font(.callout).foregroundStyle(.orange)
+                                .multilineTextAlignment(.trailing).frame(maxWidth: 280, alignment: .trailing)
                         }
                         // Nur laden: bei Spielen aus dem Meta Store immer angeboten, solange etwas fehlt – wer den
                         // Bestand erst füllen und später (oder an einem anderen Tag) bauen will, braucht dafür weder
@@ -358,12 +371,14 @@ struct GameDetail: View {
                             }
                             .controlSize(.large)
                             .disabled(downloadBlocked != nil)
+                            let size = game.status.bytesToDownload > 0 ? Installer.gigabytes(game.status.bytesToDownload)
+                                : game.status.filesToDownload == 1 ? L("One file", "Eine Datei") : L("\(game.status.filesToDownload) files", "\(game.status.filesToDownload) Dateien")
                             Text(downloadBlocked
                                  ?? (blocked == nil
-                                     ? L("\(Installer.gigabytes(game.status.bytesToDownload)) – fetches the files to this Mac; nothing is built or installed.",
-                                         "\(Installer.gigabytes(game.status.bytesToDownload)) – holt die Dateien auf diesen Mac; gebaut und installiert wird nichts.")
-                                     : L("\(Installer.gigabytes(game.status.bytesToDownload)) – this already works; building and installing follow later.",
-                                         "\(Installer.gigabytes(game.status.bytesToDownload)) – das geht schon jetzt; gebaut und installiert wird später.")))
+                                     ? L("\(size) – fetches the files to this Mac; nothing is built or installed.",
+                                         "\(size) – holt die Dateien auf diesen Mac; gebaut und installiert wird nichts.")
+                                     : L("\(size) – this already works; building and installing follow later.",
+                                         "\(size) – das geht schon jetzt; gebaut und installiert wird später.")))
                                 .font(.callout).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.trailing).frame(maxWidth: 280, alignment: .trailing)
                         }
@@ -409,7 +424,15 @@ struct GameDetail: View {
                 }
 
                 GroupBox(L("On the Vision Pro", "Auf der Vision Pro")) {
-                    Text(deviceText).frame(maxWidth: .infinity, alignment: .leading).padding(6)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(deviceText)
+                        if let signing = signingText {
+                            Label(signing.text, systemImage: signing.urgent ? "exclamationmark.triangle.fill" : "clock")
+                                .foregroundStyle(signing.urgent ? .orange : .secondary)
+                                .font(.callout)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
 
                 if !languageFiles.isEmpty || game.recipe.addons != nil || !extras.isEmpty { optionalContent }
@@ -514,6 +537,26 @@ struct GameDetail: View {
         case .olderToolchain, .unstamped: return L("Update", "Aktualisieren")
         case .notInstalled, .unknown: return L("Install", "Installieren")
         }
+    }
+
+    /// Bis wann sich die Installation öffnen lässt. Bei einem kostenlosen Team immer gezeigt (sieben Tage sind
+    /// kurz), bei einem bezahlten erst, wenn der Ablauf näher rückt.
+    private var signingText: (text: String, urgent: Bool)? {
+        guard game.installed, let record = SigningRecord.load(store: model.paths.store, recipe: game.recipe),
+              let expires = record.expires else { return nil }
+        let now = Date()
+        let urgent = record.remindFrom.map { now >= $0 } ?? false
+        guard record.free || urgent else { return nil }
+        let day = DateFormatter.localizedString(from: expires, dateStyle: .medium, timeStyle: .short)
+        if now >= expires {
+            return (L("The signature ran out on \(day): the game no longer opens. “Update” or “Install” signs it again; saved games and data are kept.",
+                      "Die Signatur ist am \(day) abgelaufen: Das Spiel lässt sich nicht mehr öffnen. „Aktualisieren“ oder „Installieren“ signiert es neu; Spielstände und Daten bleiben."), true)
+        }
+        return (record.free
+                ? L("Signed with a free Apple team: opens until \(day). Install it again before then to renew it; saved games and data are kept.",
+                    "Mit einem kostenlosen Apple-Team signiert: lässt sich bis \(day) öffnen. Installiere es vorher erneut, um es zu erneuern; Spielstände und Daten bleiben.")
+                : L("The signature runs out on \(day). Install the game again before then; saved games and data are kept.",
+                    "Die Signatur läuft am \(day) ab. Installiere das Spiel vorher erneut; Spielstände und Daten bleiben."), urgent)
     }
 
     private var deviceText: String {

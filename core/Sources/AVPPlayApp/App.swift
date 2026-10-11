@@ -2,7 +2,16 @@ import AppKit
 import AVPPlayCore
 import SwiftUI
 
+/// Der Einstieg: mit `--renew` ist dieses Programm der Hintergrunddienst (ohne Fenster, prüft die Signaturen und
+/// endet), sonst die App.
 @main
+enum Launcher {
+    static func main() {
+        if CommandLine.arguments.contains("--renew") { RenewalAgent.run() }
+        AVPPlayApp.main()
+    }
+}
+
 struct AVPPlayApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppDelegate.model
@@ -30,6 +39,10 @@ struct AVPPlayApp: App {
                     }
                 }
             }
+            // Die Einstellungen sind eine Seite des Hauptfensters; ⌘, führt dorthin.
+            CommandGroup(replacing: .appSettings) {
+                Button(L("Settings …", "Einstellungen …")) { model.section = .settings }.keyboardShortcut(",")
+            }
             CommandGroup(after: .toolbar) {
                 Button(L("Check Again", "Neu prüfen")) { model.refresh() }.keyboardShortcut("r")
             }
@@ -42,10 +55,6 @@ struct AVPPlayApp: App {
                     model.showReport = true
                 }
             }
-        }
-
-        Settings {
-            SettingsView().environmentObject(model).id(model.language)
         }
     }
 }
@@ -91,7 +100,6 @@ enum AboutPanel {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         NavigationSplitView {
@@ -106,6 +114,7 @@ struct RootView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
                     if let release = model.update { UpdateCard(release: release) }
+                    if model.usesFreeTeam { FreeAccountChip() }
                     DeviceChip()
                 }
                 .padding(12)
@@ -117,6 +126,7 @@ struct RootView: View {
                 case .jobs: JobsView()
                 case .data: DataView()
                 case .setup: SetupView()
+                case .settings: SettingsView()
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -141,15 +151,16 @@ struct RootView: View {
             model.refresh()
             model.checkAccount()
             model.loadCatalog()
+            model.reconcileBackgroundService()
             await model.checkForUpdate(manual: false)
-            await Snapshot.runIfRequested(model: model) { openSettings() }
+            await Snapshot.runIfRequested(model: model)
         }
     }
 
     /// Wie viele Punkte der Einrichtung noch offen sind bzw. wie viele Aufträge Aufmerksamkeit brauchen.
     private func badge(for section: AppSection) -> Int {
         switch section {
-        case .games, .data: return 0
+        case .games, .data, .settings: return 0
         case .jobs: return model.jobs.filter { model.phase(of: $0) == .stopped || model.phase(of: $0) == .running }.count
         case .setup:
             // Die Konten zählen nicht: Meta braucht es nur für Spiele aus dem Meta-Store, Steam nur für zwei Spiele.
@@ -209,7 +220,7 @@ enum Snapshot {
         return URL(fileURLWithPath: args[i + 1])
     }
 
-    static func runIfRequested(model: AppModel, openSettings: () -> Void) async {
+    static func runIfRequested(model: AppModel) async {
         guard let dir = directory else { return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
@@ -393,13 +404,17 @@ enum Snapshot {
             model.notice = nil
             await pause(0.5)
         }
-        openSettings()
-        await pause(0.2)
-        hideWindows()
+        // `--select <Kennung>[,<Kennung>…]`: Spiele in der Übersicht anhaken und die Leiste dazu zeigen.
+        if let i = CommandLine.arguments.firstIndex(of: "--select"), i + 1 < CommandLine.arguments.count {
+            model.section = .games
+            model.selection = Set(CommandLine.arguments[i + 1].split(separator: ",").map(String.init))
+            await pause(1.2)
+            capture("1-spiele-auswahl", dir)
+            model.selection = []
+        }
+        model.section = .settings
         await pause(1.3)
-        // Ohne Aktivierung gibt es kein „vorderstes“ Fenster; das der Einstellungen ist an seiner Kennung zu erkennen.
-        let settings = NSApp.windows.first { $0.identifier?.rawValue.lowercased().contains("settings") == true } ?? NSApp.keyWindow
-        capture("5-einstellungen", dir, window: settings)
+        capture("5-einstellungen", dir)
         // `--switch-language`: die Sprache im laufenden Programm wechseln, beide Fenster zeigen, zurückstellen.
         if CommandLine.arguments.contains("--switch-language") {
             let before = model.languageChoice
@@ -407,7 +422,9 @@ enum Snapshot {
             await pause(1)
             while model.refreshing { await pause(0.3) }
             await pause(1)
-            capture("6-gewechselt-einstellungen", dir, window: settings)
+            capture("6-gewechselt-einstellungen", dir)
+            model.section = .setup
+            await pause(0.8)
             capture("6-gewechselt-einrichtung", dir)
             model.languageChoice = before
             await pause(0.5)

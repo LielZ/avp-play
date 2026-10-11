@@ -23,6 +23,9 @@ public struct GameStatus: Sendable, Equatable {
     public var treesRequired: Int
     /// Bekannte Größe der fehlenden Pflichtdateien, die das Werkzeug laden kann.
     public var bytesToDownload: Int64
+    /// Wie viele Pflichtdateien fehlen, die das Werkzeug laden kann. Bei einem nachgeschlagenen, ungetesteten Spiel
+    /// kennt vorab niemand die Größen; dass es etwas zu laden gibt, steht trotzdem fest.
+    public var filesToDownload: Int = 0
     /// Fehlende Pflichtdateien und Ordner, die der Nutzer selbst bereitstellen muss, mit dem Hinweis des Rezepts.
     public var userProvidedMissing: [String]
     public var onDevice: OnDevice
@@ -64,6 +67,7 @@ public struct GameStatus: Sendable, Equatable {
                           treesPresent: trees.count - treesMissing.count, treesRequired: trees.count,
                           bytesToDownload: missing.filter { $0.source?.kind != .user }.reduce(0) { $0 + ($1.size ?? 0) }
                               + treesMissing.filter { $0.source.kind == .url }.reduce(0) { $0 + ($1.source.archive?.size ?? 0) },
+                          filesToDownload: missing.filter { $0.source?.kind != .user }.count + treesMissing.filter { $0.source.kind == .url }.count,
                           userProvidedMissing: byUser, onDevice: onDevice)
     }
 }

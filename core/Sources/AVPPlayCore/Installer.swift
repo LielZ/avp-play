@@ -9,6 +9,8 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
     case appNotInstalled(String)
     case badIcon(String)
     case appRunning(String)
+    /// Ein kostenloses Apple-Konto hat schon so viele Apps auf dem Gerät, wie Apple ihm erlaubt.
+    case freeTeamFull(String, installed: [String])
     /// Die App ist kein Programm, das die Toolchain starten könnte (für Androids Java-Laufzeit geschrieben).
     case notANativeApp(String)
     /// Das APK bringt nur Programmcode für einen anderen Prozessor mit (ein reines 32-Bit-Spiel).
@@ -43,6 +45,10 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
             let list = found.joined(separator: ", ")
             return L("\(title) cannot run on the Vision Pro. This build is a 32-bit game (it only contains code for \(list)); the Vision Pro's processor runs 64-bit code only, and this tool translates 64-bit Quest games. Nothing can be changed about that from here – only a 64-bit build from the developer would work. The files already downloaded can be removed on the game's page.",
                      "\(title) kann auf der Vision Pro nicht laufen. Dieser Build ist ein 32-Bit-Spiel (er enthält nur Code für \(list)); der Prozessor der Vision Pro führt ausschließlich 64-Bit-Code aus, und dieses Werkzeug übersetzt 64-Bit-Spiele der Quest. Daran lässt sich von hier aus nichts ändern – nur ein 64-Bit-Build des Entwicklers würde gehen. Die schon geladenen Dateien lassen sich auf der Seite des Spiels entfernen.")
+        case .freeTeamFull(let title, let installed):
+            let list = installed.joined(separator: ", ")
+            return L("\(title) was not installed: a free Apple account may have only \(AppleMessages.freeAppsPerDevice) apps on the Vision Pro at a time, and these are already there: \(list). Remove one on the headset (press and hold its icon, then “Remove App”), then choose “Resume”. A paid developer membership has no such limit.",
+                     "\(title) wurde nicht installiert: Ein kostenloses Apple-Konto darf nur \(AppleMessages.freeAppsPerDevice) Apps gleichzeitig auf der Vision Pro haben, und diese sind schon dort: \(list). Entferne eine auf dem Headset (Icon gedrückt halten, dann „App entfernen“) und wähle dann „Fortsetzen“. Eine bezahlte Entwickler-Mitgliedschaft hat diese Grenze nicht.")
         case .appRunning(let title):
             return L("\(title) is currently running on the Vision Pro. Installing would quit the game. Quit the game, then resume.",
                      "\(title) läuft gerade auf der Vision Pro. Eine Installation würde das Spiel beenden. Spiel beenden und dann fortsetzen.")
@@ -70,6 +76,10 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     /// Der Auftrag lädt nur. Was der Nutzer selbst bereitstellen muss, darf dann noch fehlen: es wird genannt,
     /// hält das Laden der übrigen Dateien aber nicht auf. Ohne Angabe: nein.
     public var downloadOnly: Bool?
+    /// Nur neu signieren: bauen und über die bestehende Installation legen. Gebraucht wird dann allein, woraus
+    /// gebaut wird (das APK, bei einem Linux-Spiel seine Ordner) – die großen Datendateien liegen schon auf dem
+    /// Gerät und dürfen auf dem Mac inzwischen fehlen. Ohne Angabe: nein.
+    public var resign: Bool?
 
     public init(toolchain: String) { self.toolchain = toolchain }
 }
@@ -150,10 +160,42 @@ public struct Installer: Sendable {
         switch step {
         case .account: try await checkAccount()
         case .fetch: try await fetch()
-        case .build: try await build()
-        case .stage: try stage()
+        case .build: try await exclusive { try await build() }
+        case .stage: try await exclusive { try stage() }
         case .unlock: try unlock()
         }
+    }
+
+    /// Bauen und aufs Gerät kopieren darf zur selben Zeit nur ein Programm: Alle bauen im selben Ordner der Toolchain
+    /// und sprechen dasselbe Gerät an – die App, die Kommandozeile und der Hintergrunddienst, der Signaturen erneuert.
+    func exclusive(_ body: () async throws -> Void) async throws {
+        var lock = ProcessLock.acquire(ProcessLock.installURL)
+        if lock == nil {
+            report(L("Another AVP Play process is building or copying right now – waiting for it to finish …",
+                     "Ein anderer AVP-Play-Prozess baut oder kopiert gerade – es wird gewartet, bis er fertig ist …"))
+            while lock == nil {
+                try await Task.sleep(for: .seconds(2))
+                lock = ProcessLock.acquire(ProcessLock.installURL)
+            }
+        }
+        defer { lock?.release() }
+        try await body()
+    }
+
+    /// Die Apps auf dem Gerät, die unter demselben Präfix installiert sind wie `bundle` – also mit demselben
+    /// Konto von diesem Programm. Daran wird die Grenze eines kostenlosen Kontos vorab geprüft.
+    public static func appsSharingPrefix(with bundle: String, in apps: [InstalledApp]) -> [InstalledApp] {
+        guard let dot = bundle.lastIndex(of: ".") else { return [] }
+        let prefix = String(bundle[...dot])
+        return apps.filter { $0.bundleIdentifier.hasPrefix(prefix) }
+    }
+
+    /// Stünde eine Installation mit einem kostenlosen Konto an Apples Grenze an? Dann die Namen der Apps, die
+    /// schon dort sind. Eine App, die selbst schon installiert ist, wird nur ersetzt und zählt nicht neu.
+    public static func freeTeamBlock(bundle: String, apps: [InstalledApp]) -> [String]? {
+        let mine = appsSharingPrefix(with: bundle, in: apps)
+        guard !mine.contains(where: { $0.bundleIdentifier == bundle }), mine.count >= AppleMessages.freeAppsPerDevice else { return nil }
+        return mine.map(\.name).sorted()
     }
 
     // MARK: Auswahl und Bestand
@@ -187,6 +229,15 @@ public struct Installer: Sendable {
         let trees = TreeStore(store: store).missing(recipe: recipe)
         guard trees.isEmpty else { throw InstallError.missingTrees(trees.map(\.name), recipe: recipe.id) }
         return local
+    }
+
+    /// Woraus gebaut wird, muss da sein: das APK und die Ordner, die die Toolchain selbst liest.
+    func buildInputs() throws {
+        if let apk = recipe.files.first(where: { $0.role == "apk" }), ContentStore.fileSize(store.url(for: apk, in: recipe)) == nil {
+            throw InstallError.missingFiles(count: 1, examples: [apk.name], recipe: recipe.id)
+        }
+        let trees = TreeStore(store: store).missing(recipe: recipe).filter { $0.role != .data }
+        guard trees.isEmpty else { throw InstallError.missingTrees(trees.map(\.name), recipe: recipe.id) }
     }
 
     func target() throws -> (device: Device, bundle: String, toolchain: Toolchain) {
@@ -304,7 +355,7 @@ public struct Installer: Sendable {
     /// Build vor dem Kopieren. Installieren über eine bestehende App erhält deren Daten.
     func build() async throws {
         guard let team = request.team else { throw InstallError.teamMissing }
-        _ = try localFiles()
+        if request.resign == true { try buildInputs() } else { _ = try localFiles() }
         let (device, bundle, toolchain) = try target()
         let commit = toolchain.commit()
         report(L("Device: \(device.name) (visionOS \(device.osVersion)); app: \(bundle); toolchain: \(commit)",
@@ -324,11 +375,28 @@ public struct Installer: Sendable {
            let running = try? control.runningExecutables(device: device), DeviceControl.isRunning(app, executables: running) {
             throw InstallError.appRunning(recipe.title)
         }
+        // Ein kostenloses Konto: Apples Grenze vorab prüfen, statt erst zu bauen und dann an ihr zu scheitern.
+        if AppleTeams.isFree(team), let apps = try? control.apps(device: device),
+           let there = Installer.freeTeamBlock(bundle: bundle, apps: apps) {
+            throw InstallError.freeTeamFull(recipe.title, installed: there)
+        }
         let log = store.directory(for: recipe).appendingPathComponent(".last-build.log")
         let started = Date()
         try toolchain.buildAndInstall(recipe: recipe, team: team, device: device, bundleId: request.bundleId, log: log,
                                       extraEnvironment: TreeStore(store: store).toolchainEnvironment(recipe: recipe))
         report(String(format: L("Built and installed (%.0f s).", "Gebaut und installiert (%.0f s)."), Date().timeIntervalSince(started)))
+        // Womit signiert wurde und bis wann: Daran erinnert die App rechtzeitig vor dem Ablauf.
+        let free = AppleTeams.isFree(team)
+        let record = SigningRecord(team: team, free: free, installed: Date(), expires: toolchain.signingExpiry(recipe: recipe),
+                                   bundleId: bundle)
+        record.save(store: store, recipe: recipe)
+        if free {
+            let until = record.expires.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short) }
+            report(until.map { L("Signed with a free Apple team: the game opens until \($0). Install it again before then to renew it; its data stays.",
+                                 "Mit einem kostenlosen Apple-Team signiert: Das Spiel lässt sich bis \($0) öffnen. Installiere es vorher erneut, um es zu erneuern; seine Daten bleiben.") }
+                   ?? L("Signed with a free Apple team: the game opens for seven days. Install it again before then to renew it; its data stays.",
+                        "Mit einem kostenlosen Apple-Team signiert: Das Spiel lässt sich sieben Tage lang öffnen. Installiere es vorher erneut, um es zu erneuern; seine Daten bleiben."))
+        }
     }
 
     /// Icon bereitlegen und die Toolchain vorbereiten.
