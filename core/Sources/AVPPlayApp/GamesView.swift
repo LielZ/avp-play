@@ -62,7 +62,7 @@ struct GamesView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !model.selection.isEmpty { SelectionBar() }
+                SelectionBarHost(picked: model.picked)
             }
             .navigationTitle(L("Games", "Spiele"))
             .searchable(text: $model.searchText, prompt: L("Search games", "Spiele suchen"))
@@ -311,8 +311,7 @@ struct GameCard: View {
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(model.selection.contains(game.id) ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.separator.opacity(hovering ? 1 : 0.5)),
-                                                                 lineWidth: model.selection.contains(game.id) ? 2 : 1))
+        .overlay(SelectionBorder(picked: model.picked, id: game.id, hovering: hovering))
         .shadow(color: .black.opacity(hovering ? 0.22 : 0.1), radius: hovering ? 10 : 4, y: 2)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)

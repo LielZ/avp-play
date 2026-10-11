@@ -57,6 +57,12 @@ struct GameOptions: Codable, Equatable {
     var addons = true
 }
 
+/// Die in der Übersicht angehakten Spiele – ein eigener, kleiner Zustand (siehe `AppModel.picked`).
+@MainActor
+final class GameSelection: ObservableObject {
+    @Published var ids: Set<String> = []
+}
+
 enum AccountState: Equatable {
     case unknown, checking, signedOut, signedIn
     /// Ein Token liegt im Schlüsselbund, Meta nimmt ihn aber nicht (mehr) an – oder ist nicht erreichbar.
@@ -212,7 +218,14 @@ final class AppModel: ObservableObject {
     private var runningTask: Task<Void, Never>?
     private var stopRequested: Set<String> = []
     /// Die in der Übersicht angehakten Spiele, und ob gerade ein Sammelauftrag für sie vorbereitet wird.
-    @Published var selection: Set<String> = []
+    /// Nicht `@Published`: Hinge die Auswahl am Zustand der ganzen Oberfläche, würde jeder Haken die Übersicht neu
+    /// filtern, sortieren und jede schon gezeichnete Karte samt Bild neu aufbauen – bei vielen geladenen Spielen
+    /// spürbar träge. So hören nur die Haken, die Rahmen und die Leiste auf sie.
+    let picked = GameSelection()
+    var selection: Set<String> {
+        get { picked.ids }
+        set { picked.ids = newValue }
+    }
     @Published var bulkBusy = false
     /// Der Hintergrunddienst, der ablaufende Signaturen erneuert: ob er eingetragen sein soll, in welchem Abstand
     /// er prüft, und was der letzte Lauf ergab.
@@ -237,9 +250,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Die Spiele, die zu den gesetzten Filtern passen.
-    var shownGames: [Game] {
+    var shownGames: [Game] { visible(allGames) }
+
+    /// Aus einer Menge von Spielen die, die zu den gesetzten Filtern passen, in der Reihenfolge der Übersicht.
+    func visible(_ games: [Game]) -> [Game] {
         let words = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return allGames.filter { game in
+        return games.filter { game in
             // „Geprüft“ und „Von Nutzern bestätigt“ ergänzen einander; alle anderen Filter engen weiter ein.
             ((!filterVerified && !filterCommunity) || (filterVerified && game.trust == .verified) || (filterCommunity && game.trust == .community))
                 && (!filterInstalled || game.installed)

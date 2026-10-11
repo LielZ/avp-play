@@ -141,7 +141,11 @@ enum BulkAction { case install, download }
 
 extension AppModel {
     /// Die angehakten Spiele, in der Reihenfolge der Übersicht.
-    var selectedGames: [Game] { shownGames.filter { selection.contains($0.id) } }
+    var selectedGames: [Game] {
+        let ids = selection
+        // Erst die wenigen angehakten heraussuchen, dann ordnen – nicht die ganze Übersicht sortieren.
+        return visible(allGames.filter { ids.contains($0.id) })
+    }
 
     func toggleSelection(_ game: Game) {
         if selection.contains(game.id) { selection.remove(game.id) } else { selection.insert(game.id) }
@@ -215,28 +219,60 @@ extension AppModel {
     }
 }
 
-/// Der Haken auf einer Karte der Übersicht.
+/// Der Haken auf einer Karte der Übersicht. Er hört nur auf die Auswahl, nicht auf den Zustand der ganzen App.
 struct SelectionMark: View {
     @EnvironmentObject var model: AppModel
     let game: Game
 
-    var body: some View {
-        let on = model.selection.contains(game.id)
-        Button { model.toggleSelection(game) } label: {
-            Image(systemName: on ? "checkmark.square.fill" : "square")
-                .font(.title3)
-                .foregroundStyle(on ? Color.accentColor : Color.secondary)
-                .contentShape(Rectangle())
+    var body: some View { Mark(picked: model.picked, game: game) }
+
+    private struct Mark: View {
+        @ObservedObject var picked: GameSelection
+        let game: Game
+
+        var body: some View {
+            let on = picked.ids.contains(game.id)
+            Button {
+                if on { picked.ids.remove(game.id) } else { picked.ids.insert(game.id) }
+            } label: {
+                Image(systemName: on ? "checkmark.square.fill" : "square")
+                    .font(.title3)
+                    .foregroundStyle(on ? Color.accentColor : Color.secondary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(on ? L("Remove from the selection", "Aus der Auswahl nehmen") : L("Select, to install or download several games at once", "Auswählen, um mehrere Spiele auf einmal zu installieren oder zu laden"))
+            .accessibilityLabel(L("Select \(game.recipe.title)", "\(game.recipe.title) auswählen"))
         }
-        .buttonStyle(.plain)
-        .help(on ? L("Remove from the selection", "Aus der Auswahl nehmen") : L("Select, to install or download several games at once", "Auswählen, um mehrere Spiele auf einmal zu installieren oder zu laden"))
-        .accessibilityLabel(L("Select \(game.recipe.title)", "\(game.recipe.title) auswählen"))
+    }
+}
+
+/// Der Rahmen einer Karte: farbig, wenn sie angehakt ist.
+struct SelectionBorder: View {
+    @ObservedObject var picked: GameSelection
+    let id: String
+    let hovering: Bool
+
+    var body: some View {
+        let on = picked.ids.contains(id)
+        RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(on ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.separator.opacity(hovering ? 1 : 0.5)), lineWidth: on ? 2 : 1)
+    }
+}
+
+/// Zeigt die Leiste, sobald etwas angehakt ist.
+struct SelectionBarHost: View {
+    @ObservedObject var picked: GameSelection
+
+    var body: some View {
+        if !picked.ids.isEmpty { SelectionBar(picked: picked) }
     }
 }
 
 /// Die Leiste unter der Übersicht, sobald Spiele angehakt sind: installieren oder nur laden, für alle zugleich.
 struct SelectionBar: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject var picked: GameSelection
 
     var body: some View {
         let games = model.selectedGames

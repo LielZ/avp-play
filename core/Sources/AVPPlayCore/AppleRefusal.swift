@@ -80,8 +80,8 @@ public enum AppleMessages {
             return L("Apple refused to add this Vision Pro to your developer team: the team has no free place for another device\(free ? " (a free account gets very few within \(freeSigningDays) days)" : ""). Free a place at developer.apple.com under Certificates, Identifiers & Profiles › Devices, or wait until one becomes free, then choose “Resume”.",
                      "Apple hat diese Vision Pro nicht in dein Entwicklerteam aufgenommen: Das Team hat keinen freien Platz für ein weiteres Gerät\(free ? " (ein kostenloses Konto bekommt innerhalb von \(freeSigningDays) Tagen nur wenige)" : ""). Gib bei developer.apple.com unter Certificates, Identifiers & Profiles › Devices einen Platz frei oder warte, bis einer frei wird, und wähle dann „Fortsetzen“.")
         case .capability:
-            return L("Apple refused to sign the game: a free Apple account may not use a permission this build asks for. Make sure the newest toolchain is installed (see “Setup”) – it leaves out the two permissions free accounts cannot have. If it stops here again, this game needs a paid developer membership.",
-                     "Apple hat das Signieren abgelehnt: Ein kostenloses Apple-Konto darf eine Berechtigung nicht verwenden, die dieser Bau verlangt. Prüfe, dass die neueste Toolchain installiert ist (siehe „Einrichtung“) – sie lässt die zwei Berechtigungen weg, die es für kostenlose Konten nicht gibt. Hält es hier wieder an, braucht dieses Spiel eine bezahlte Entwickler-Mitgliedschaft.")
+            return L("Apple refused to sign the game: a free Apple account may not use a permission this build asks for. Make sure the newest toolchain is installed (see “Setup”) – it leaves out what free accounts cannot have. If it stops here again, this game needs a paid developer membership.",
+                     "Apple hat das Signieren abgelehnt: Ein kostenloses Apple-Konto darf eine Berechtigung nicht verwenden, die dieser Bau verlangt. Prüfe, dass die neueste Toolchain installiert ist (siehe „Einrichtung“) – sie lässt weg, was es für kostenlose Konten nicht gibt. Hält es hier wieder an, braucht dieses Spiel eine bezahlte Entwickler-Mitgliedschaft.")
         case .identifierTaken:
             return L("Apple refused the app's identifier: it already belongs to another developer team – typically because the game was installed with a different Apple account before. Under “Settings › Advanced”, choose another prefix for the app identifiers, then start again. The Vision Pro treats the game as a new app; its data is copied again.",
                      "Apple hat die Kennung der App abgelehnt: Sie gehört schon einem anderen Entwicklerteam – meist, weil das Spiel vorher mit einem anderen Apple-Konto installiert wurde. Wähle unter „Einstellungen › Erweitert“ ein anderes Präfix für die App-Kennungen und starte neu. Die Vision Pro sieht das Spiel dann als neue App; seine Daten werden neu kopiert.")
@@ -114,8 +114,13 @@ public enum AppleMessages {
            "Höchstens \(freeAppsPerDevice) Apps deines Kontos können gleichzeitig auf der Vision Pro sein."),
          L("At most \(freeAppIdsPerWeek) different games can be set up within \(freeSigningDays) days.",
            "Höchstens \(freeAppIdsPerWeek) verschiedene Spiele lassen sich innerhalb von \(freeSigningDays) Tagen neu anlegen."),
-         L("Two permissions are missing (more address space, low-latency streaming). Large games may fail to start or run less smoothly; so far only Beat Saber has been tested this way.",
-           "Zwei Berechtigungen fehlen (mehr Adressraum, verzögerungsarmes Streaming). Große Spiele starten womöglich nicht oder laufen weniger flüssig; getestet ist so bisher nur Beat Saber."),
+         // Von den drei Berechtigungen der Toolchain gibt Apple kostenlosen Konten eine (mehr Arbeitsspeicher) und
+         // zwei nicht. Genannt wird nur die, die ein Spiel betrifft: mehr Adressraum. Die andere, verzögerungsarmes
+         // Streaming, braucht keines der Spiele im Katalog.
+         // Nachgesehen an den signierten Bauten vom 2026-10-11: mit dem kostenlosen Team steht genau
+         // increased-memory-limit in der Signatur, mit dem bezahlten stehen alle drei darin.
+         L("The permission for more memory, which large games need, is there with a free account too. Only the one for more address space is missing; a very large game may fail to start because of it.",
+           "Die Berechtigung für mehr Arbeitsspeicher, die große Spiele brauchen, gibt es auch mit einem kostenlosen Konto. Nur die für mehr Adressraum fehlt; ein sehr großes Spiel startet deshalb womöglich nicht."),
          L("Once per account, the developer has to be trusted on the headset: Settings › General › VPN & Device Management.",
            "Einmal je Konto muss der Entwickler auf dem Headset als vertrauenswürdig bestätigt werden: Einstellungen › Allgemein › VPN & Geräteverwaltung.")]
     }

@@ -410,6 +410,22 @@ enum Snapshot {
             model.selection = Set(CommandLine.arguments[i + 1].split(separator: ",").map(String.init))
             await pause(1.2)
             capture("1-spiele-auswahl", dir)
+            // Wie lange der Hauptfaden nach einem Haken beschäftigt ist: Die kurze Pause endet erst, wenn die
+            // Oberfläche neu gezeichnet ist.
+            var lines = ["Spiele gesamt: \(model.allGames.count), gezeigt: \(model.shownGames.count)"]
+            if let first = model.shownGames.first {
+                for round in 1...6 {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    model.toggleSelection(first)
+                    await pause(0.001)
+                    lines.append(String(format: "Haken %d: %.0f ms", round, (CFAbsoluteTimeGetCurrent() - start) * 1000))
+                    await pause(0.4)
+                }
+                let start = CFAbsoluteTimeGetCurrent()
+                for _ in 0..<20 { _ = model.shownGames }
+                lines.append(String(format: "Liste filtern und sortieren: %.1f ms je Durchgang", (CFAbsoluteTimeGetCurrent() - start) * 50))
+            }
+            try? lines.joined(separator: "\n").write(to: dir.appendingPathComponent("auswahl.txt"), atomically: true, encoding: .utf8)
             model.selection = []
         }
         model.section = .settings
