@@ -1417,6 +1417,16 @@ final class OwnershipCacheTests: XCTestCase {
         XCTAssertFalse(OwnershipCache.needsCheck(cache.load()["1"], now: now.addingTimeInterval(3600)))
         XCTAssertTrue(OwnershipCache.needsCheck(cache.load()["1"], now: now.addingTimeInterval(25 * 3600)))
         XCTAssertTrue(OwnershipCache.needsCheck(cache.load()["1"], now: now.addingTimeInterval(-60)), "eine Antwort aus der Zukunft gilt nicht")
+        // Ein „Nein“ gilt eine Stunde, nicht einen Tag: das Spiel kann inzwischen gekauft sein.
+        XCTAssertFalse(OwnershipCache.needsCheck(cache.load()["2"], now: now.addingTimeInterval(1800)))
+        XCTAssertTrue(OwnershipCache.needsCheck(cache.load()["2"], now: now.addingTimeInterval(3700)))
+        XCTAssertFalse(OwnershipCache.needsCheck(cache.load()["1"], now: now.addingTimeInterval(3700)))
+        // Eine einzelne Antwort ersetzt nur ihren Eintrag und lässt die übrigen stehen.
+        let later = now.addingTimeInterval(120)
+        let merged = cache.record(appId: "2", owned: true, checked: later)
+        XCTAssertEqual(merged["2"], .init(owned: true, checked: later))
+        XCTAssertEqual(cache.load()["1"], .init(owned: true, checked: now))
+        XCTAssertEqual(cache.load()["2"]?.owned, true)
         cache.clear()
         XCTAssertEqual(cache.load(), [:])
     }

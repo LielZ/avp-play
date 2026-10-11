@@ -266,6 +266,39 @@ struct OwnershipLabel: View {
     }
 }
 
+/// Besitz in einer Zeile, mit dem Knopf, der Meta jetzt noch einmal fragt – auf der Seite jedes Spiels aus dem
+/// Meta-Store. Wer ein Spiel gerade gekauft hat, muss nicht warten, bis die App von selbst wieder fragt.
+struct PurchaseCheck: View {
+    @EnvironmentObject var model: AppModel
+    let game: Game
+    var trailing = false
+
+    var body: some View {
+        if let app = game.recipe.store.appId {
+            let checking = model.checkingPurchase.contains(game.id)
+            VStack(alignment: trailing ? .trailing : .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    OwnershipLabel(owned: model.owned(game), checking: checking || model.checkingOwnership, compact: false)
+                    Button(checking ? L("Checking …", "Wird geprüft …") : L("Check Purchase", "Kauf prüfen")) { model.checkPurchase(game) }
+                        .controlSize(.small)
+                        .disabled(checking)
+                        .help(L("Asks Meta now whether the account you are signed in with owns this game.",
+                                "Fragt Meta jetzt, ob das Konto, mit dem du angemeldet bist, dieses Spiel besitzt."))
+                }
+                if let note = model.purchaseNote[game.id] {
+                    Text(note).font(.callout).foregroundStyle(.secondary)
+                        .multilineTextAlignment(trailing ? .trailing : .leading)
+                        .frame(maxWidth: trailing ? 280 : .infinity, alignment: trailing ? .trailing : .leading)
+                } else if let record = model.ownership[app] {
+                    Text(L("Asked \(record.checked.formatted(date: .abbreviated, time: .shortened))",
+                           "Gefragt am \(record.checked.formatted(date: .abbreviated, time: .shortened))"))
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+}
+
 struct CoverImage: View {
     @EnvironmentObject var model: AppModel
     let game: Game
@@ -428,6 +461,9 @@ struct GameDetail: View {
                                 .font(.callout).foregroundStyle(.orange)
                                 .multilineTextAlignment(.trailing).frame(maxWidth: 280, alignment: .trailing)
                         }
+                        // Gilt das Spiel als nicht gekauft, steht der Weg, das zu ändern, gleich hier – nicht erst
+                        // unten unter „Gut zu wissen“.
+                        if model.owned(game) == .no { PurchaseCheck(game: game, trailing: true) }
                         // Nur laden: bei Spielen aus dem Meta Store immer angeboten, solange etwas fehlt – wer den
                         // Bestand erst füllen und später (oder an einem anderen Tag) bauen will, braucht dafür weder
                         // Toolchain noch Vision Pro. Bei allen anderen wie bisher nur, wenn allein dem Bauen etwas
@@ -519,7 +555,11 @@ struct GameDetail: View {
                         Text(game.needsMetaAccount
                              ? L("Before anything is downloaded, Meta is asked whether you own this game. Without a purchase, nothing is downloaded.", "Vor dem Laden wird bei Meta geprüft, dass du dieses Spiel gekauft hast. Ohne Kauf wird nichts geladen.")
                              : L("This game does not come from the Meta Store. The game files come from your own purchase and are never downloaded.", "Dieses Spiel kommt nicht aus dem Meta-Store. Die Spieldateien stammen aus deinem eigenen Kauf und werden nie geladen."))
-                        OwnershipLabel(owned: model.owned(game), checking: model.checkingOwnership, compact: false)
+                        if game.needsMetaAccount {
+                            PurchaseCheck(game: game)
+                        } else {
+                            OwnershipLabel(owned: model.owned(game), checking: model.checkingOwnership, compact: false)
+                        }
                         if let app = game.recipe.store.appId, let page = URL(string: "https://www.meta.com/experiences/\(app)/") {
                             Link(L("View in the Meta Store", "Im Meta-Store ansehen"), destination: page)
                         }
@@ -546,6 +586,7 @@ struct GameDetail: View {
         // Sagt der Katalog erst danach, unter welchem Namen die Toolchain das Spiel kennt, wird noch einmal geprüft.
         .task(id: "\(game.id) \(game.catalog?.target ?? "")") { model.prepare(game) }
         .task(id: game.id) { model.checkStoreVersions(only: game) }
+        .task(id: game.id) { model.recheckPurchaseIfStale(game) }
         .confirmationDialog(L("Remove the files of \(game.recipe.title) from this Mac?", "Die Dateien von \(game.recipe.title) von diesem Mac entfernen?"),
                             isPresented: $confirmRemove) {
             Button(L("Remove \(Installer.gigabytes(game.storeBytes))", "\(Installer.gigabytes(game.storeBytes)) entfernen"), role: .destructive) { model.removeFiles(game) }

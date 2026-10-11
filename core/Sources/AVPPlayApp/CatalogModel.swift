@@ -223,10 +223,7 @@ extension AppModel {
                 let meta = MetaClient(token: token)
                 let user = try await meta.me()
                 let owned = try await meta.ownsApp(appId: entry.appId, userId: user)
-                let cache = OwnershipCache(store: paths.store)
-                var records = cache.load()
-                records[entry.appId] = OwnershipRecord(owned: owned, checked: Date())
-                try? cache.save(records)
+                let records = OwnershipCache(store: paths.store).record(appId: entry.appId, owned: owned)
                 await MainActor.run { self.ownership = records }
                 guard owned else {
                     throw Stop(L("This game is not in your Meta account. Nothing is looked up or downloaded.",

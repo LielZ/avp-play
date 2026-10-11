@@ -132,6 +132,9 @@ final class AppModel: ObservableObject {
     /// Metas letzte Antworten auf die Besitzfrage, je Store-App.
     @Published var ownership: [String: OwnershipRecord] = [:]
     @Published var checkingOwnership = false
+    /// Spiele, für die gerade einzeln bei Meta nachgefragt wird („Kauf prüfen“), und was dabei zuletzt zu sagen war.
+    @Published var checkingPurchase: Set<String> = []
+    @Published var purchaseNote: [String: String] = [:]
     /// Was zuletzt beim Einrichten von Metas Werkzeug herauskam – steht in der Karte „Meta-Konto“.
     @Published var toolNote: String?
     /// Der Dialog „Ein Problem melden“ ist offen; `reportJob` nennt den Auftrag, um den es geht.
@@ -317,7 +320,6 @@ final class AppModel: ObservableObject {
         guard !due.isEmpty else { return }
         checkingOwnership = true
         Task.detached {
-            var records = known
             let gate = RequestGate()
             do {
                 let client = MetaClient(token: try TokenStore().read())
@@ -326,14 +328,63 @@ final class AppModel: ObservableObject {
                     try await gate.waitForTurn()
                     let owned = try await client.ownsApp(appId: app, userId: user)
                     await gate.requestFinished()
-                    records[app] = OwnershipRecord(owned: owned, checked: Date())
-                    try? cache.save(records)
-                    let now = records
+                    let now = cache.record(appId: app, owned: owned)
                     await MainActor.run { self.ownership = now }
                 }
             } catch {}
             await MainActor.run { self.checkingOwnership = false }
         }
+    }
+
+    /// „Kauf prüfen“: fragt Meta jetzt für dieses eine Spiel, ob das Konto es besitzt – dieselbe dokumentierte
+    /// Abfrage wie im täglichen Durchgang, nach `/me`, und trägt die Antwort ein. Für jemanden, der ein Spiel
+    /// gerade gekauft hat und es hier noch als „nicht in deinem Meta-Konto“ sieht.
+    func checkPurchase(_ game: Game, quiet: Bool = false) {
+        guard let app = game.recipe.store.appId, !checkingPurchase.contains(game.id) else { return }
+        if let why = storeBlocker { purchaseNote[game.id] = why; return }
+        guard account == .signedIn else {
+            purchaseNote[game.id] = L("Sign in to Meta under “Setup” first.", "Melde dich zuerst unter „Einrichtung“ bei Meta an.")
+            return
+        }
+        checkingPurchase.insert(game.id)
+        purchaseNote[game.id] = nil
+        let cache = OwnershipCache(store: paths.store)
+        let id = game.id
+        Task.detached {
+            var note: String?
+            var owned: Bool?
+            do {
+                let client = MetaClient(token: try TokenStore().read())
+                let user = try await client.me()
+                let answer = try await client.ownsApp(appId: app, userId: user)
+                owned = answer
+                let now = cache.record(appId: app, owned: answer)
+                await MainActor.run { self.ownership = now }
+                // Ungefragt (beim Öffnen der Seite) wird ein weiteres „Nein“ nicht eigens erläutert.
+                if !answer, !quiet {
+                    note = L("Meta says this game is not in the account you are signed in with. A new purchase can take a few minutes to show up; a game bought with another Meta account needs that account under “Setup”.",
+                             "Meta sagt, dass dieses Spiel nicht zu dem Konto gehört, mit dem du angemeldet bist. Ein neuer Kauf kann ein paar Minuten brauchen, bis er sichtbar ist; ein Spiel, das mit einem anderen Meta-Konto gekauft wurde, braucht dieses Konto unter „Einrichtung“.")
+                }
+            } catch {
+                if !quiet { note = L("Meta could not be asked: \(Redaction.redact("\(error)"))", "Meta ließ sich nicht fragen: \(Redaction.redact("\(error)"))") }
+            }
+            let final = note
+            let bought = owned == true
+            await MainActor.run {
+                self.checkingPurchase.remove(id)
+                self.purchaseNote[id] = final
+                // Ein ungetestetes Spiel, das nun doch zum Konto gehört: gleich nachschlagen, woraus es besteht.
+                if bought, let game = self.allGames.first(where: { $0.id == id }), game.draft, !game.prepared { self.prepare(game) }
+            }
+        }
+    }
+
+    /// Beim Öffnen der Seite eines Spiels: Ein „Nein“, das älter als zehn Minuten ist, wird noch einmal erfragt.
+    /// Nicht bei einem ungetesteten Spiel, das noch nachgeschlagen wird – dort stellt `prepare` dieselbe Frage.
+    func recheckPurchaseIfStale(_ game: Game) {
+        guard let app = game.recipe.store.appId, let record = ownership[app], !record.owned,
+              Date().timeIntervalSince(record.checked) > 600, account == .signedIn, !(game.draft && !game.prepared) else { return }
+        checkPurchase(game, quiet: true)
     }
 
     // MARK: Auswahl je Spiel

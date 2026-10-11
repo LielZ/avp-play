@@ -140,7 +140,8 @@ their own recipe.
   copy is kept in a cache (`~/Library/Caches/AVPPlay`) that the *Data* page can empty; Settings › Pictures turns
   this off. Games whose store page names no picture keep a coloured tile with their name.
 - **Ownership** is asked of Meta before anything is downloaded, and once a day so the app can show which games
-  are yours. Add-on content is downloaded only for purchases Meta confirms. Bought
+  are yours. A game that counted as not owned is asked about again within the hour, and **Check Purchase** on a
+  game's page asks right away. Add-on content is downloaded only for purchases Meta confirms. Bought
   something later? **Sync DLCs** on the game's page asks again, downloads what is new and adds it to the installed
   game without building it again.
 - **Requests to Meta** stop at the first unexpected answer. The app never tries a file to see whether Meta will
