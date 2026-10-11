@@ -104,11 +104,15 @@ public enum Renewal {
         return shipped + extra
     }
 
-    /// Unter welcher Kennung die Installation auf dem Gerät liegt: die gemerkte, sonst die üblichen Kandidaten.
+    /// Unter welcher Kennung die Installation auf dem Gerät liegt: die gemerkte, sonst die, unter der ein Team dieser
+    /// Art üblicherweise installiert. Nie die Kennung der anderen Art: Liegt neben einer entfernten Installation mit
+    /// einem kostenlosen Team noch eine mit einem bezahlten, gehört deren Kennung dem bezahlten Team – sie mit dem
+    /// kostenlosen neu zu signieren, lehnte Apple ab.
     static func installedBundle(recipe: Recipe, record: SigningRecord, apps: [InstalledApp]) -> String? {
         let target = recipe.toolchain.target
-        let candidates = [record.bundleId, Toolchain.defaultBundleId(target: target),
-                          Toolchain.bundleId(target: target, prefix: Toolchain.defaultBundlePrefix(freeTeam: record.team))].compactMap { $0 }
+        let usual = record.free ? Toolchain.bundleId(target: target, prefix: Toolchain.defaultBundlePrefix(freeTeam: record.team))
+                                : Toolchain.defaultBundleId(target: target)
+        let candidates = [record.bundleId, usual].compactMap { $0 }
         return candidates.first { bundle in apps.contains { $0.bundleIdentifier == bundle } }
     }
 
@@ -118,11 +122,12 @@ public enum Renewal {
     ///   - toolchain: die installierte Toolchain; ohne sie wird nichts gebaut
     ///   - preferredDevice: das in der App gewählte Headset, wenn mehrere erreichbar sind
     ///   - dryRun: nur feststellen, was fällig wäre und ob es ginge
+    ///   - force: diese Rezepte gelten als fällig, gleich wie lange ihre Signatur noch gilt (zum Ausprobieren)
     public static func run(recipes: [Recipe], store: ContentStore, toolchain: Toolchain?, preferredDevice: String? = nil,
-                           now: Date = Date(), dryRun: Bool = false,
+                           now: Date = Date(), dryRun: Bool = false, force: Set<String> = [],
                            log: @escaping @Sendable (String) -> Void = { _ in }) async -> RenewalReport {
         let installations = recipes.compactMap { r in SigningRecord.load(store: store, recipe: r).map { (recipe: r, record: $0) } }
-        let due = installations.filter { isDue($0.record, now: now) }
+        let due = installations.filter { force.contains($0.recipe.id) || isDue($0.record, now: now) }
         var report = RenewalReport(ran: now, known: installations.count, outcomes: [])
         guard !due.isEmpty else { return report }
 
@@ -189,8 +194,8 @@ public enum Renewal {
                 try await installer.perform(.build)
                 let fresh = SigningRecord.load(store: store, recipe: recipe)
                 if let after = fresh?.expires, let before = record.expires, after.timeIntervalSince(before) < 3600 {
-                    let note = L("installed again, but Apple has not issued a new signing profile yet: it still runs out on the same day. The next check tries again.",
-                                 "neu installiert, aber Apple hat noch kein neues Signierprofil ausgestellt: Es läuft weiter am selben Tag ab. Die nächste Prüfung versucht es erneut.")
+                    let note = L("installed again, but the signature does not last longer than before. A later check tries again.",
+                                 "neu installiert, aber die Signatur gilt nicht länger als zuvor. Eine spätere Prüfung versucht es erneut.")
                     remember(note)
                     outcome(.unchanged, note, expires: after)
                 } else {

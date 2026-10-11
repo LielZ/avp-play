@@ -106,7 +106,7 @@ avpplay – command line for the AVP Play core library
   avpplay toolchain install <archive>          check and install a package
   avpplay install <id> --team <team ID>        build, install, copy missing data, unlock add-on content
   avpplay stage <id>                           only copy missing data and add-on content (no build)
-  avpplay renew [--dry-run]                    sign installed games again whose signature runs out soon (what the background service does)
+  avpplay renew [--dry-run] [--force <id>]     sign installed games again whose signature runs out soon (what the background service does)
   avpplay job start <id> --team <team ID>      job: check, download, build, install, copy, unlock
   avpplay job resume <job>                     resume an interrupted or stopped job
   avpplay job show|cancel <job>                show progress / cancel            avpplay jobs   all jobs
@@ -150,7 +150,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay toolchain install <Archiv>           Paket prüfen und installieren
   avpplay install <id> --team <Team-ID>        bauen, installieren, Daten ergänzend kopieren, Zusatzinhalte freischalten
   avpplay stage <id>                           nur Daten und Zusatzinhalte ergänzend kopieren (ohne Build)
-  avpplay renew [--dry-run]                    installierte Spiele neu signieren, deren Signatur bald abläuft (was der Hintergrunddienst tut)
+  avpplay renew [--dry-run] [--force <id>]     installierte Spiele neu signieren, deren Signatur bald abläuft (was der Hintergrunddienst tut)
   avpplay job start <id> --team <Team-ID>      Auftrag: prüfen, laden, bauen, installieren, kopieren, freischalten
   avpplay job resume <Auftrag>                 unterbrochenen oder angehaltenen Auftrag fortsetzen
   avpplay job show|cancel <Auftrag>            Stand zeigen / abbrechen          avpplay jobs   alle Aufträge
@@ -172,7 +172,7 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 """)
 }
 
-let valued: Set<String> = ["account", "steam-account", "store", "recipes", "locale", "with", "only", "interval", "from", "to",
+let valued: Set<String> = ["account", "steam-account", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force",
                            "team", "device", "bundle-id", "toolchain", "icon", "tool", "jobs", "toolchains"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
@@ -608,7 +608,7 @@ case "renew":
     let dry = o.flags.contains("dry-run")
     let report = await Renewal.run(recipes: Renewal.recipes(bundled: recipesDirectory(o), drafts: DataLocation.base.appendingPathComponent("drafts", isDirectory: true)),
                                    store: contentStore(o), toolchain: chosen ?? toolchainPackager(o).installed().first,
-                                   preferredDevice: o.value("device"), dryRun: dry, log: { print($0) })
+                                   preferredDevice: o.value("device"), dryRun: dry, force: Set(o.values["force"] ?? []), log: { print($0) })
     if !dry { report.save() }
     print(report.outcomes.isEmpty
         ? L("Nothing is due (\(report.known) installation(s) with a known date).", "Nichts fällig (\(report.known) Installation(en) mit bekanntem Datum).")

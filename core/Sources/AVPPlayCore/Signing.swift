@@ -61,6 +61,71 @@ public struct SigningRecord: Codable, Sendable, Equatable {
     }
 }
 
+/// Die Bereitstellungsprofile, die Xcode auf diesem Mac zwischenspeichert.
+///
+/// Am Gerät beobachtet (kostenloses Team, Xcode 27.1, 2026-10-11): Solange für eine App ein Profil im
+/// Zwischenspeicher liegt, nimmt ein neuer Bau genau dieses – mit demselben Ablaufdatum. Ein Spiel „neu zu
+/// installieren“ verlängert also nichts. Fehlt das Profil im Zwischenspeicher, holt `xcodebuild` eines bei Apple,
+/// und Apple stellt dabei ein neues aus, das wieder die volle Zeit gilt. Deshalb wird vor einem Bau, der eine
+/// Signatur erneuern soll, das zwischengespeicherte Profil genau dieser einen App entfernt – nichts sonst.
+public enum SigningProfiles {
+    public static var cacheDirectories: [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [home.appendingPathComponent("Library/Developer/Xcode/UserData/Provisioning Profiles", isDirectory: true),
+                home.appendingPathComponent("Library/MobileDevice/Provisioning Profiles", isDirectory: true)]
+    }
+
+    struct Profile: Equatable {
+        var applicationIdentifier: String
+        var expires: Date?
+        var managed: Bool
+    }
+
+    /// Packt ein Profil aus (eine signierte Hülle um eine Property-Liste).
+    static func decode(_ url: URL) -> Data? {
+        guard let text = try? Toolchain.capture(["/usr/bin/security", "cms", "-D", "-i", url.path]), !text.isEmpty else { return nil }
+        return Data(text.utf8)
+    }
+
+    static func describe(_ decoded: Data) -> Profile? {
+        guard let plist = try? PropertyListSerialization.propertyList(from: decoded, format: nil) as? [String: Any],
+              let id = (plist["Entitlements"] as? [String: Any])?["application-identifier"] as? String else { return nil }
+        return Profile(applicationIdentifier: id, expires: plist["ExpirationDate"] as? Date, managed: plist["IsXcodeManaged"] as? Bool ?? false)
+    }
+
+    /// Entfernt die von Xcode verwalteten, zwischengespeicherten Profile genau einer App, sofern sie nicht mehr
+    /// länger als `fresherThan` gelten – ein Profil, das eben erst ausgestellt wurde, bleibt, damit nicht jeder Bau
+    /// ein neues anfordert. Profile, die jemand von Hand angelegt hat, werden nie angefasst.
+    /// - Returns: wie viele Dateien entfernt wurden
+    @discardableResult
+    public static func removeStale(team: String, bundleId: String, fresherThan: TimeInterval, now: Date = Date(),
+                                   directories: [URL] = SigningProfiles.cacheDirectories) -> Int {
+        removeStale(team: team, bundleId: bundleId, fresherThan: fresherThan, now: now, directories: directories, decode: decode)
+    }
+
+    static func removeStale(team: String, bundleId: String, fresherThan: TimeInterval, now: Date, directories: [URL],
+                            decode: (URL) -> Data?) -> Int {
+        guard team.count == 10, !bundleId.isEmpty else { return 0 }
+        let wanted = "\(team).\(bundleId)"
+        var removed = 0
+        for directory in directories {
+            let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+            for file in files where ["mobileprovision", "provisionprofile"].contains(file.pathExtension) {
+                guard let data = decode(file), let profile = describe(data), profile.managed,
+                      profile.applicationIdentifier == wanted else { continue }
+                if let expires = profile.expires, expires.timeIntervalSince(now) > fresherThan { continue }
+                if (try? FileManager.default.removeItem(at: file)) != nil { removed += 1 }
+            }
+        }
+        return removed
+    }
+
+    /// Ab welcher Restlaufzeit ein Bau ein neues Profil anfordern soll: bei einem kostenlosen Team, sobald das alte
+    /// einen Tag alt ist (sieben Tage sind kurz, und wer neu installiert, will die volle Woche); bei einem bezahlten
+    /// erst im letzten Monat.
+    public static func renewBelow(free: Bool) -> TimeInterval { (free ? 6 : 30) * 86_400 }
+}
+
 /// Eine einzelne Signatur vor dem Bau. Ein Signierschlüssel, den die Xcode-App aus dem App Store angelegt hat,
 /// lässt macOS nachfragen, bevor `codesign` ihn benutzen darf – und der Bau signiert die App und Dutzende
 /// eingebettete Bibliotheken gleichzeitig, sodass jedes wartende `codesign` sein eigenes Passwortfenster zeigt.

@@ -38,7 +38,10 @@ public enum AppleMessages {
     /// Die Wortlaute, an denen eine Ablehnung zu erkennen ist – das Genauere zuerst. Verglichen wird ohne
     /// Rücksicht auf Groß- und Kleinschreibung; typografische Anführungszeichen sind schon vereinheitlicht.
     static let patterns: [(AppleRefusal, String)] = [
-        (.tooManyApps, #"maximum number of (installed )?apps (for|using an?) free (development|developer) profiles?"#),
+        // Der Satz dazu steht nur in der vollen Ausgabe von `devicectl`; das Bauskript behält die letzten Zeilen, und
+        // dort stehen Apples Kennzeichen: die Stelle im Installer, die die Apps eines kostenlosen Profils zählt, und
+        // ihre Fehlernummer (am Gerät beobachtet, visionOS 27.2, 2026-10-11).
+        (.tooManyApps, #"maximum number of (installed )?apps (for|using an?) free (development|developer) profiles?|MIFreeProfileValidatedAppTracker|LibMISErrorNumber = -402620383"#),
         (.tooManyAppIds, #"maximum app id limit|app ids every 7 days|maximum number of app ids"#),
         (.tooManyDevices, #"maximum number of (registered )?[a-z ]*devices|no devices? slots? (are )?available"#),
         (.capability, #"personal development teams?[^\n]{0,200}do(es)? not support|personal team[^\n]{0,200}(isn't|is not) eligible"#),
@@ -111,8 +114,8 @@ public enum AppleMessages {
            "Höchstens \(freeAppsPerDevice) Apps deines Kontos können gleichzeitig auf der Vision Pro sein."),
          L("At most \(freeAppIdsPerWeek) different games can be set up within \(freeSigningDays) days.",
            "Höchstens \(freeAppIdsPerWeek) verschiedene Spiele lassen sich innerhalb von \(freeSigningDays) Tagen neu anlegen."),
-         L("Two permissions are missing (more address space, low-latency streaming). Large games may fail to start or run less smoothly; nobody has tested the verified games this way yet.",
-           "Zwei Berechtigungen fehlen (mehr Adressraum, verzögerungsarmes Streaming). Große Spiele starten womöglich nicht oder laufen weniger flüssig; die geprüften Spiele hat so noch niemand getestet."),
+         L("Two permissions are missing (more address space, low-latency streaming). Large games may fail to start or run less smoothly; so far only Beat Saber has been tested this way.",
+           "Zwei Berechtigungen fehlen (mehr Adressraum, verzögerungsarmes Streaming). Große Spiele starten womöglich nicht oder laufen weniger flüssig; getestet ist so bisher nur Beat Saber."),
          L("Once per account, the developer has to be trusted on the headset: Settings › General › VPN & Device Management.",
            "Einmal je Konto muss der Entwickler auf dem Headset als vertrauenswürdig bestätigt werden: Einstellungen › Allgemein › VPN & Geräteverwaltung.")]
     }

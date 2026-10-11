@@ -7,6 +7,9 @@ final class AppleRefusalTests: XCTestCase {
         let said: [(String, AppleRefusal)] = [
             ("error: Unable to install \u{201C}Moss\u{201D}\nThe maximum number of apps for free development profiles has been reached.", .tooManyApps),
             ("ERROR: This device has reached the maximum number of installed apps using a free developer profile", .tooManyApps),
+            // So steht es im Protokoll der Toolchain, die von der Ausgabe nur das Ende behält (am Gerät beobachtet).
+            ("[4/5] installing…\n               LegacyErrorString = ApplicationVerificationFailed\n               LibMISErrorNumber = -402620383\n  install failed — once more in 5 s", .tooManyApps),
+            ("!! install FAILED:                FunctionName = -[MIFreeProfileValidatedAppTracker _onQueue_addReferenceForApplicationIdentifier:bundle:error:]", .tooManyApps),
             ("error: Communication with Apple failed: Your maximum App ID limit has been reached. You may create up to 10 App IDs every 7 days.", .tooManyAppIds),
             ("error: Personal development teams, including \"Jane Appleseed\", do not support the Extended Virtual Addressing capability.", .capability),
             ("error: Failed to register bundle identifier: The app identifier \"a.b.c\" cannot be registered to your development team because it is not available.", .identifierTaken),
@@ -123,8 +126,11 @@ final class RenewalTests: XCTestCase {
         record.bundleId = nil
         let usual = Toolchain.defaultBundleId(target: "demo")
         let free = Toolchain.bundleId(target: "demo", prefix: Toolchain.defaultBundlePrefix(freeTeam: "Z9Y8X7W6V5"))
-        XCTAssertEqual(Renewal.installedBundle(recipe: recipe, record: record, apps: [app(usual)]), usual)
         XCTAssertEqual(Renewal.installedBundle(recipe: recipe, record: record, apps: [app(free)]), free)
+        // Die Kopie eines bezahlten Teams daneben ist nicht die gemeinte: Ihre Kennung gehört dem anderen Team.
+        XCTAssertNil(Renewal.installedBundle(recipe: recipe, record: record, apps: [app(usual)]))
+        let paid = SigningRecord(team: "A1B2C3D4E5", free: false, installed: now, expires: now)
+        XCTAssertEqual(Renewal.installedBundle(recipe: recipe, record: paid, apps: [app(usual), app(free)]), usual)
         XCTAssertNil(Renewal.installedBundle(recipe: recipe, record: record, apps: [app("com.other.demo")]))
     }
 
@@ -148,6 +154,40 @@ final class RenewalTests: XCTestCase {
         let file = dir.appendingPathComponent("renewal.json")
         later.save(to: file)
         XCTAssertEqual(RenewalReport.load(from: file)?.outcomes.count, 1)
+    }
+
+    /// Vor dem Erneuern verschwindet das zwischengespeicherte Profil genau dieser App – und nur das: kein fremdes,
+    /// kein von Hand angelegtes, und keines, das eben erst ausgestellt wurde.
+    func testOnlyTheStaleManagedProfileOfThisAppIsRemoved() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("qi-prof-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func profile(_ name: String, app: String, daysLeft: Double, managed: Bool = true) throws {
+            let plist: [String: Any] = ["Entitlements": ["application-identifier": app], "ExpirationDate": now.addingTimeInterval(daysLeft * day),
+                                        "IsXcodeManaged": managed]
+            try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: dir.appendingPathComponent(name))
+        }
+        let team = "Z9Y8X7W6V5", bundle = "jane.z9y8x7w6v5.dev.klepton.target.moss"
+        try profile("mine-old.mobileprovision", app: "\(team).\(bundle)", daysLeft: 2)
+        try profile("mine-fresh.mobileprovision", app: "\(team).\(bundle)", daysLeft: 6.9)
+        try profile("mine-by-hand.mobileprovision", app: "\(team).\(bundle)", daysLeft: 2, managed: false)
+        try profile("other-game.mobileprovision", app: "\(team).jane.z9y8x7w6v5.dev.klepton.target.batman", daysLeft: 2)
+        try profile("other-team.mobileprovision", app: "A1B2C3D4E5.\(bundle)", daysLeft: 2)
+        try profile("wildcard.mobileprovision", app: "\(team).*", daysLeft: 2)
+        try Data("kein Profil".utf8).write(to: dir.appendingPathComponent("notiz.txt"))
+        let plain: (URL) -> Data? = { try? Data(contentsOf: $0) }
+        let removed = SigningProfiles.removeStale(team: team, bundleId: bundle, fresherThan: SigningProfiles.renewBelow(free: true), now: now,
+                                                  directories: [dir, dir.appendingPathComponent("fehlt")], decode: plain)
+        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted(),
+                       ["mine-by-hand.mobileprovision", "mine-fresh.mobileprovision", "notiz.txt", "other-game.mobileprovision",
+                        "other-team.mobileprovision", "wildcard.mobileprovision"])
+        // Ohne Team oder Kennung wird nichts angefasst.
+        XCTAssertEqual(SigningProfiles.removeStale(team: "", bundleId: bundle, fresherThan: .infinity, now: now, directories: [dir], decode: plain), 0)
+        XCTAssertEqual(SigningProfiles.removeStale(team: team, bundleId: "", fresherThan: .infinity, now: now, directories: [dir], decode: plain), 0)
+        // Ein bezahltes Team: erst im letzten Monat.
+        XCTAssertEqual(SigningProfiles.renewBelow(free: false), 30 * day)
     }
 
     func testTheLockIsHeldByOneAtATime() throws {

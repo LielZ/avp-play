@@ -240,9 +240,22 @@ public struct Installer: Sendable {
         guard trees.isEmpty else { throw InstallError.missingTrees(trees.map(\.name), recipe: recipe.id) }
     }
 
+    /// Unter welcher Kennung das Spiel installiert wird: die ausdrücklich genannte; sonst bei einem kostenlosen Team
+    /// die mit dessen eigenem Präfix (die übliche Kennung gehört womöglich schon einem bezahlten Team, und Apple
+    /// gäbe sie keinem zweiten); ohne Team – beim bloßen Kopieren – die der bestehenden Installation; sonst die übliche.
+    var resolvedBundleId: String {
+        let target = recipe.toolchain.target
+        if let given = request.bundleId { return given }
+        if let team = request.team {
+            return AppleTeams.isFree(team) ? Toolchain.bundleId(target: target, prefix: Toolchain.defaultBundlePrefix(freeTeam: team))
+                                           : Toolchain.defaultBundleId(target: target)
+        }
+        return SigningRecord.load(store: store, recipe: recipe)?.bundleId ?? Toolchain.defaultBundleId(target: target)
+    }
+
     func target() throws -> (device: Device, bundle: String, toolchain: Toolchain) {
         let device = try control.pick(udid: request.device)
-        let bundle = request.bundleId ?? Toolchain.defaultBundleId(target: recipe.toolchain.target)
+        let bundle = resolvedBundleId
         let toolchain = try Toolchain(root: URL(fileURLWithPath: request.toolchain))
         guard toolchain.satisfies(minCommit: recipe.toolchain.minCommit) else {
             throw ToolchainError.tooOld(have: toolchain.commit(), need: recipe.toolchain.minCommit)
@@ -376,17 +389,26 @@ public struct Installer: Sendable {
             throw InstallError.appRunning(recipe.title)
         }
         // Ein kostenloses Konto: Apples Grenze vorab prüfen, statt erst zu bauen und dann an ihr zu scheitern.
-        if AppleTeams.isFree(team), let apps = try? control.apps(device: device),
+        // (`AVPPLAY_NO_FREE_PRECHECK=1` lässt die Vorabprüfung aus – um zu sehen, was Apple selbst dazu sagt.)
+        if AppleTeams.isFree(team), ProcessInfo.processInfo.environment["AVPPLAY_NO_FREE_PRECHECK"] != "1",
+           let apps = try? control.apps(device: device),
            let there = Installer.freeTeamBlock(bundle: bundle, apps: apps) {
             throw InstallError.freeTeamFull(recipe.title, installed: there)
         }
+        // Ein neuer Bau verlängert die Signatur nur, wenn Xcode dafür ein neues Profil holt (siehe `SigningProfiles`).
+        // Bei einem kostenlosen Team gilt das für jede Installation, sonst nur fürs Erneuern.
+        let free = AppleTeams.isFree(team)
+        if free || request.resign == true,
+           SigningProfiles.removeStale(team: team, bundleId: bundle, fresherThan: SigningProfiles.renewBelow(free: free)) > 0 {
+            report(L("Signing: a new profile is requested from Apple, so that the game opens for the full time again.",
+                     "Signatur: Bei Apple wird ein neues Profil angefordert, damit das Spiel wieder die volle Zeit gilt."))
+        }
         let log = store.directory(for: recipe).appendingPathComponent(".last-build.log")
         let started = Date()
-        try toolchain.buildAndInstall(recipe: recipe, team: team, device: device, bundleId: request.bundleId, log: log,
+        try toolchain.buildAndInstall(recipe: recipe, team: team, device: device, bundleId: bundle, log: log,
                                       extraEnvironment: TreeStore(store: store).toolchainEnvironment(recipe: recipe))
         report(String(format: L("Built and installed (%.0f s).", "Gebaut und installiert (%.0f s)."), Date().timeIntervalSince(started)))
         // Womit signiert wurde und bis wann: Daran erinnert die App rechtzeitig vor dem Ablauf.
-        let free = AppleTeams.isFree(team)
         let record = SigningRecord(team: team, free: free, installed: Date(), expires: toolchain.signingExpiry(recipe: recipe),
                                    bundleId: bundle)
         record.save(store: store, recipe: recipe)
@@ -520,7 +542,7 @@ public struct Installer: Sendable {
             }
             let log = store.directory(for: recipe).appendingPathComponent(".last-sync.log")
             try? FileManager.default.removeItem(at: log)
-            try toolchain.syncTrees(recipe: recipe, environment: env, device: device, bundleId: request.bundleId, copy: false, log: log)
+            try toolchain.syncTrees(recipe: recipe, environment: env, device: device, bundleId: bundle, copy: false, log: log)
             let want = TreeStore.listing(of: mirror)
             let total = Installer.gigabytes(want.values.reduce(0, +))
             report(L("Game data: \(want.count) files (\(total)) belong on the device; "
@@ -542,7 +564,7 @@ public struct Installer: Sendable {
             for attempt in 1...attempts {
                 let mark = ContentStore.fileSize(log) ?? 0
                 do {
-                    try toolchain.syncTrees(recipe: recipe, environment: env, device: device, bundleId: request.bundleId, copy: true, log: log)
+                    try toolchain.syncTrees(recipe: recipe, environment: env, device: device, bundleId: bundle, copy: true, log: log)
                     break
                 } catch {
                     guard attempt < attempts, Installer.isTransferDrop(Installer.text(of: log, from: mark)) else { throw error }
