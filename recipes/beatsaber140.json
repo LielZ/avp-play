@@ -10,7 +10,7 @@
  },
  "toolchain": {
   "target": "beatsaber140",
-  "minCommit": "6d7a819"
+  "minCommit": "698dda6"
  },
  "files": [
   {
@@ -42,8 +42,8 @@
     "de": "Zusatzsongs: Meta liefert nur Gekauftes aus."
    },
    {
-    "en": "From version 1.45 on the game has no edge smoothing here yet. With foveated rendering on (the default, a switch in the game's start window) it is drawn at the display's full resolution instead.",
-    "de": "Ab Fassung 1.45 hat das Spiel hier noch keine Kantenglättung. Mit eingeschaltetem Foveated Rendering (Standard, ein Schalter im Startfenster des Spiels) wird es dafür in der vollen Auflösung des Displays gezeichnet."
+    "en": "From version 1.45 on, edge smoothing (2x or 4x) is a setting in the game's start window. It is off by default because it costs frame rate; lower the resolution there along with it. With foveated rendering on (the default) the game is drawn at the display's full resolution.",
+    "de": "Ab Fassung 1.45 ist die Kantenglättung (2x oder 4x) eine Einstellung im Startfenster des Spiels. Sie ist standardmäßig aus, weil sie Bildrate kostet; dazu dort die Auflösung verringern. Mit eingeschaltetem Foveated Rendering (Standard) wird das Spiel in der vollen Auflösung des Displays gezeichnet."
    }
   ]
  },

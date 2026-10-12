@@ -79,7 +79,7 @@ recipes in [`recipes/`](recipes) are:
 |---|---|---|
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick |
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
-| Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) has no edge smoothing yet and is drawn at the display's full resolution instead, with foveated rendering (on by default) |
+| Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
 | Moss | Meta Store | |
 | Walkabout Mini Golf | Meta Store | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes |
 | SUPERHOT VR | Meta Store | |
@@ -90,7 +90,7 @@ recipes in [`recipes/`](recipes) are:
 | Eye of the Temple | Meta Store | the whip is drawn thanks to a fix a user sent in |
 | Resident Evil 4 | Meta Store | about 8.5 GB; runs with a fix a user sent in |
 | Skydance's BEHEMOTH | Meta Store | about 28 GB; runs with fixes users sent in; the first start builds shaders behind the loading screen for several minutes |
-| Maestro | Meta Store | song packs you bought are unlocked (checked with one pack); others are skipped |
+| Maestro | Meta Store | song packs you bought are unlocked (checked with one pack); others are skipped; edge smoothing as a setting, off by default |
 | Star Wars: Tales from the Galaxy's Edge | Meta Store | about 7 GB; runs with a fix a user sent in and the project's own |
 | BattleGlide | Meta Store | early-access build (0.4.1) |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
