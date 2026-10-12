@@ -85,7 +85,11 @@ final class RecipeTests: XCTestCase {
         XCTAssertTrue(wrath.files.filter(\.required).allSatisfy { $0.sha256 != nil && $0.size != nil })
         let bs = try XCTUnwrap(all.first { $0.id == "beatsaber140" })
         XCTAssertEqual(bs.addons?.kind, .deliveredAssets)
-        XCTAssertEqual(bs.addons?.items?.count, 248)
+        XCTAssertEqual(bs.addons?.items?.count, 280)
+        // Beat Saber folgt seit 1.45 dem Store wie die anderen: nichts hält es bei seiner Fassung.
+        XCTAssertNil(bs.store.pinned)
+        XCTAssertEqual(bs.versionCode, 3148)
+        XCTAssertTrue(bs.files.allSatisfy { $0.sha256 != nil && $0.size != nil })
     }
 }
 

@@ -25,9 +25,21 @@ public enum StoreUpdate {
     /// Jede Datei des neuen Builds nimmt den Platz ihres Gegenstücks ein: bei gleichem Namen dessen Rolle und
     /// Ziel, sonst die der geprüften Dateien gleicher Endung, sonst den Ordner, in dem eine Quest weitere Dateien
     /// ablegt. Was das geprüfte Rezept aus anderen Quellen als dem Store bezieht, bleibt, wie es ist.
+    ///
+    /// Zusatzinhalte, die der Store nur an Käufer ausliefert (Beat Sabers Songs), sind keine Dateien des Spiels:
+    /// Der neue Build führt jeden davon unter einer neuen Kennung, und Meta gibt nur heraus, was gekauft ist. Sie
+    /// bleiben deshalb Zusatzinhalte – jeder bekannte unter der Kennung des neuen Builds –, und was der neue Build
+    /// darüber hinaus nennt (Songs, die es beim geprüften noch nicht gab), bleibt weg: Zu welchem Kauf eine solche
+    /// Datei gehört, steht nur in den Spieldaten, und als Pflichtdatei hielte sie jeden Auftrag an der ersten
+    /// nicht gekauften an.
     public static func make(tested: Recipe, build: CatalogBuild, files: [ListedFile]) throws -> Recipe {
         guard let apk = files.first(where: { $0.kind == "APK" }) else { throw ListingError.nothingListed }
         let fromStore = tested.files.filter { $0.source == nil }
+        let delivered = tested.addons?.kind == .deliveredAssets
+        let addonNames = delivered ? Set((tested.addons?.items ?? []).map(\.name)) : []
+        // Hat das geprüfte Spiel neben APK und OBB eigene Dateien aus dem Store, kann eine unbekannte auch eine
+        // davon sein; sonst ist sie ein Zusatzinhalt, den das geprüfte Rezept noch nicht kennt.
+        let hasLooseContent = fromStore.contains { $0.role != "apk" && $0.role != "main-obb" }
         func ext(_ name: String) -> String { (name as NSString).pathExtension.lowercased() }
         func like(_ old: RecipeFile, name: String, id: String) -> RecipeFile {
             var file = old
@@ -48,7 +60,9 @@ public enum StoreUpdate {
         var seen: Set<String> = [apk.name]
         let oldMain = fromStore.first { $0.role == "main-obb" }
         let fallback = tested.package.isEmpty ? DraftRecipe.packageFolderPlaceholder : DraftRecipe.packageFolder(package: tested.package)
-        for file in files where file.kind != "APK" && seen.insert(file.name).inserted {
+        for file in files where file.kind != "APK" {
+            if delivered, file.kind == "ASSET", addonNames.contains(file.name) || !hasLooseContent { continue }
+            guard seen.insert(file.name).inserted else { continue }
             if file.kind == "OBB", let oldMain {
                 list.append(like(oldMain, name: file.name, id: file.id))
                 continue
@@ -81,6 +95,18 @@ public enum StoreUpdate {
         recipe.versionName = build.version
         recipe.versionCode = build.versionCode
         recipe.files = list
+        if delivered {
+            var ids: [String: String] = [:]
+            for file in files where file.kind == "ASSET" && ids[file.name] == nil { ids[file.name] = file.id }
+            recipe.addons?.items = (tested.addons?.items ?? []).compactMap { item in
+                guard let id = ids[item.name] else { return nil }
+                var moved = item
+                moved.id = id
+                moved.size = nil
+                moved.sha256 = nil
+                return moved
+            }
+        }
         recipe.status = .init(playability: "untested", download: "listed", notes: [
             LocalizedText(en: "Version \(build.version) from the Meta Store. The project tested \(tested.versionName); this newer one has not been tested with AVP Play. It may not start, and add-on content may stay locked. You can go back to the tested version at any time.",
                           de: "Fassung \(build.version) aus dem Meta-Store. Geprüft hat das Projekt \(tested.versionName); diese neuere ist mit AVP Play nicht getestet. Sie startet vielleicht nicht, und Zusatzinhalte bleiben vielleicht gesperrt. Zur geprüften Fassung kommst du jederzeit zurück.")

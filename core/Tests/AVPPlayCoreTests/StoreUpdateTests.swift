@@ -60,6 +60,42 @@ final class StoreUpdateTests: XCTestCase {
         XCTAssertThrowsError(try StoreUpdate.make(tested: tested(), build: build, files: Array(listed.dropFirst())))
     }
 
+    func testAddOnsTheStoreDeliversFollowTheNewBuildAndNeverBecomeFilesOfTheGame() throws {
+        func file(_ name: String, _ role: String, _ dest: String?, local: String? = nil) -> RecipeFile {
+            RecipeFile(name: name, role: role, id: "1000000", size: 10, sha256: String(repeating: "a", count: 64), required: true,
+                       dest: dest, localName: local, locale: nil, source: nil)
+        }
+        let songs = [AddonItem(sku: "P1S1", name: "boundless", id: "2000001", size: 11, sha256: String(repeating: "b", count: 64), group: "one"),
+                     AddonItem(sku: "P1S2", name: "epic", id: "2000002", size: nil, sha256: nil, group: "one"),
+                     AddonItem(sku: "P2S1", name: "withdrawn", id: "2000003", size: nil, sha256: nil, group: "two")]
+        let tested = Recipe(schema: Recipe.supportedSchema, id: "saber", title: "Saber", package: "com.example.saber", versionName: "1.40",
+                            versionCode: 1716, store: .init(appId: "2448060205267927"), toolchain: .init(target: "saber", minCommit: "abc1234"),
+                            files: [file("saber.apk", "apk", "", local: "saber.apk"), file("main.1716.com.example.saber.obb", "main-obb", "android-files/obb")],
+                            addons: Addons(kind: .deliveredAssets, dest: "android-files/klepton-assets", items: songs),
+                            status: .init(playability: "verified", download: "proven", notes: nil), icon: nil, trees: nil)
+        let build = CatalogBuild(buildId: "30000000000000001", version: "1.45", versionCode: 3148, fileName: nil)
+        let listed = [ListedFile(name: "saber.apk", id: "40000000000000001", kind: "APK", sizeText: "60MB"),
+                      ListedFile(name: "main.3148.com.example.saber.obb", id: "40000000000000002", kind: "OBB", sizeText: "1GB"),
+                      ListedFile(name: "boundless", id: "40000000000000003", kind: "ASSET", sizeText: "11MB"),
+                      ListedFile(name: "epic", id: "40000000000000004", kind: "ASSET", sizeText: "12MB"),
+                      ListedFile(name: "brandnew", id: "40000000000000005", kind: "ASSET", sizeText: "9MB")]
+        let newest = try StoreUpdate.make(tested: tested, build: build, files: listed)
+
+        XCTAssertEqual(newest.files.map(\.name), ["saber.apk", "main.3148.com.example.saber.obb"],
+                       "kein Song ist eine Datei des Spiels – auch der nicht, den das geprüfte Rezept noch nicht kennt")
+        XCTAssertEqual(newest.addons?.kind, .deliveredAssets)
+        XCTAssertEqual(newest.addons?.dest, "android-files/klepton-assets")
+        let items = newest.addons?.items ?? []
+        XCTAssertEqual(items.map(\.name), ["boundless", "epic"], "was der neue Build nicht mehr führt, fällt weg")
+        XCTAssertEqual(items.map(\.id), ["40000000000000003", "40000000000000004"], "unter der Kennung des neuen Builds")
+        XCTAssertEqual(items.map(\.sku), ["P1S1", "P1S2"], "der Kauf, zu dem ein Song gehört, bleibt der geprüfte")
+        XCTAssertTrue(items.allSatisfy { $0.size == nil && $0.sha256 == nil }, "nichts vom geprüften Build gilt als Prüfsumme des neuen")
+        // Mit der Kaufliste des Kontos wird daraus genau das Gekaufte.
+        let wanted = FetchPlan.wantedFiles(recipe: newest, selection: FetchSelection(ownedSKUs: ["P1S2", "P9S9"]))
+        XCTAssertEqual(wanted.filter { $0.role == "addon" }.map(\.name), ["epic"])
+        XCTAssertEqual(wanted.first { $0.role == "addon" }?.id, "40000000000000004")
+    }
+
     func testMetasAnswerIsReadForItsNewestBuildAndNothingElse() {
         let answer = Data(#"{"data":{"node":{"__typename":"Application","displayName":"Golf","supportedBinaries":{"edges":[{"node":{"__typename":"AndroidBinary","changeLog":null,"version":"6.7","versionCode":60366,"id":"27353254667689625"}},{"node":{"__typename":"AndroidBinary","version":"6.8","versionCode":62568,"id":"28028576350157450"}},{"node":{"version":"x","versionCode":99999999,"id":"not-a-number"}},{"node":null}]}}}}"#.utf8)
         let newest = MetaClient.newestBuild(inAnswer: answer)

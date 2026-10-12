@@ -79,7 +79,7 @@ recipes in [`recipes/`](recipes) are:
 |---|---|---|
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick |
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
-| Beat Saber 1.40.8 | Meta Store | purchased song packs are downloaded and unlocked |
+| Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn without edge smoothing for now, at a higher resolution instead |
 | Moss | Meta Store | |
 | Walkabout Mini Golf | Meta Store | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes |
 | SUPERHOT VR | Meta Store | |
@@ -154,7 +154,8 @@ their own recipe.
   at most once in twenty hours per game, with the query the store's own apps use (it is not a documented
   developer interface) – and offers it next to the tested one, as your choice and marked as untested. Files that
   did not change between two versions are taken from the copy on your Mac instead of being downloaded again.
-  Beat Saber stays at its tested version.
+  Beat Saber's song packs move to the newer version with it; songs that are newer than the tested version are
+  not fetched until the project has tested a version that has them.
 - **Apple signing** uses the team you are signed in with in Xcode. The app reads the list of teams from Xcode's
   settings and nothing else.
 - **The project's own service** (`avpplay.martek.de`) holds the list of further games and what users report about
