@@ -1,0 +1,50 @@
+{
+ "files": [
+  {
+   "dest": "",
+   "id": "26882819858072718",
+   "localName": "x3634830803298285.apk",
+   "name": "demeo-1.42.40696-release-Android-Quest.apk",
+   "required": true,
+   "role": "apk",
+   "size": 137292032,
+   "sha256": "e24659ce028abbc9f0e3da14ff3307d1cb6f8cc38b3d44102fe72fc86fd640a8"
+  },
+  {
+   "dest": "@obb",
+   "id": "26882816618073042",
+   "name": "main.142040696.com.resolutiongames.demeo.obb",
+   "required": true,
+   "role": "main-obb",
+   "size": 4162176210,
+   "sha256": "ff0b644200ce3bb50c581e794e71a71a60a4898f62f845b50f12ca53f61605ed"
+  }
+ ],
+ "id": "store-3634830803298285",
+ "package": "com.resolutiongames.demeo",
+ "schema": 1,
+ "status": {
+  "playability": "verified",
+  "download": "proven",
+  "notes": [
+   {
+    "en": "Marked as verified by the project on 2026-10-13. File list as Meta's tool reports it for this build; 2 of 2 checksums recorded from a download.",
+    "de": "Vom Projekt am 2026-10-13 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 2 von 2 Prüfsummen aus einem Download erfasst."
+   },
+   {
+    "en": "The game's mixed-reality mode works: your room shows around the board. The game cannot sign in to its maker's account service here, because that needs a sign-in proof only Meta's own software on a Quest hands out; it plays with a local player whose name you set in the game's start window (Settings, \"Player name\"). Playing online with others has not been tried. The first minutes of a session can stutter while graphics are prepared; the next start does that work in the start window. Needs toolchain 365 or newer.",
+    "de": "Der Mixed-Reality-Modus des Spiels funktioniert: Dein Raum ist um das Spielbrett herum zu sehen. Beim Kontodienst des Herstellers kann sich das Spiel hier nicht anmelden, weil das einen Anmeldenachweis braucht, den nur Metas eigene Software auf einer Quest ausstellt; es läuft mit einem lokalen Spieler, dessen Namen du im Startfenster des Spiels setzt (Einstellungen, „Spielername“). Online mit anderen zu spielen wurde nicht ausprobiert. In den ersten Minuten einer Sitzung kann es ruckeln, während Grafik vorbereitet wird; beim nächsten Start geschieht das im Startfenster. Braucht Toolchain 365 oder neuer."
+   }
+  ]
+ },
+ "store": {
+  "appId": "3634830803298285"
+ },
+ "title": "Demeo",
+ "toolchain": {
+  "minCommit": "0f2a42c",
+  "target": "x3634830803298285"
+ },
+ "versionCode": 142040696,
+ "versionName": "1.42.40696-release"
+}

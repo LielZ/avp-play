@@ -45,7 +45,8 @@ game has run once. Under *Advanced*, *Display output* says how finely the finish
 it starts at *Light*, which leaves the graphics chip more time for the game. *Frame rate* offers *Up to 100*, the
 default, and *Up to 120*, which is smoother where the game manages it and the Vision Pro's display can do it; when
 a game cannot keep up, the Vision Pro halves the rate for a while (100 to 50, 120 to 60). Mixed-reality games have
-no such choice: their room shows only in the space that runs at up to 100.
+no such choice: their room shows only in the space that runs at up to 100. Where a game shows a player name it
+takes from the headset's account and cannot change itself, Settings has a *Player name* field for it.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -102,11 +103,12 @@ recipes in [`recipes/`](recipes) are:
 | Star Wars: Tales from the Galaxy's Edge | Meta Store | about 7 GB; runs with a fix a user sent in and the project's own |
 | BattleGlide | Meta Store | early-access build (0.4.1) |
 | TRIANGLE STRATEGY | Meta Store | about 7.5 GB; its mixed-reality mode works – your room shows around the playing field; runs with a fix a user sent in |
+| Demeo | Meta Store | about 4.3 GB; its mixed-reality mode works – your room shows around the board; it cannot sign in to its maker's account service (that needs Meta's own sign-in proof) and plays with a local player, whose name you set in the start window; playing online with others has not been tried |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |
 | Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German |
 
-These twenty are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
+These twenty-one are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
 Quest title from the Meta Store – some 17,000, loaded page by page as you scroll. What you see on each is a label:
 
 | Label | Meaning |
@@ -122,7 +124,7 @@ engine. Each verified game needed its own adjustments before it ran, so expect a
 Afterwards say how it went with one click (that is what the labels are made of), or let an AI coding assistant
 try to fix it ("Fix with AI") and send the fix in for review.
 
-All twenty were installed with this app on the author's headset. "Community Verified" means exactly what it
+All twenty-one were installed with this app on the author's headset. "Community Verified" means exactly what it
 says: reports from users, not a guarantee. A recipe is tied to one build of a game; other builds need
 their own recipe.
 
