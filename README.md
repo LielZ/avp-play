@@ -79,7 +79,7 @@ recipes in [`recipes/`](recipes) are:
 |---|---|---|
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick |
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
-| Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn without edge smoothing for now, at a higher resolution instead |
+| Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) has no edge smoothing yet and is drawn at the display's full resolution instead, with foveated rendering (on by default) |
 | Moss | Meta Store | |
 | Walkabout Mini Golf | Meta Store | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes |
 | SUPERHOT VR | Meta Store | |

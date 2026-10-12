@@ -10,7 +10,7 @@
  },
  "toolchain": {
   "target": "beatsaber140",
-  "minCommit": "d8fc285"
+  "minCommit": "6d7a819"
  },
  "files": [
   {
@@ -42,8 +42,8 @@
     "de": "Zusatzsongs: Meta liefert nur Gekauftes aus."
    },
    {
-    "en": "From version 1.45 on the game has no edge smoothing here yet; it is drawn at a higher resolution instead.",
-    "de": "Ab Fassung 1.45 hat das Spiel hier noch keine Kantenglättung; es wird stattdessen in höherer Auflösung gezeichnet."
+    "en": "From version 1.45 on the game has no edge smoothing here yet. With foveated rendering on (the default, a switch in the game's start window) it is drawn at the display's full resolution instead.",
+    "de": "Ab Fassung 1.45 hat das Spiel hier noch keine Kantenglättung. Mit eingeschaltetem Foveated Rendering (Standard, ein Schalter im Startfenster des Spiels) wird es dafür in der vollen Auflösung des Displays gezeichnet."
    }
   ]
  },
