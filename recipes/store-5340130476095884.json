@@ -1,0 +1,59 @@
+{
+ "files": [
+  {
+   "dest": "",
+   "id": "8190083034433933",
+   "localName": "x5340130476095884.apk",
+   "name": "Newera-Android-Shipping-arm64_signed.apk",
+   "required": true,
+   "role": "apk",
+   "size": 66772622,
+   "sha256": "206e0a4b38a9c53d69223b9ed24a794267f35c9dd57c947102726a5e3b0aa787"
+  },
+  {
+   "dest": "@obb",
+   "id": "8190081267767443",
+   "name": "main.13214.com.square_enix.android_meta.trianglexr.obb",
+   "required": true,
+   "role": "main-obb",
+   "size": 4294605727,
+   "sha256": "868033530d6ccee1c662a7e6514fc7fdd9ce8ac841c7c1d6e035859dc340f839"
+  },
+  {
+   "dest": "android-files/Android/obb/com.square_enix.android_meta.trianglexr",
+   "id": "8190076947767875",
+   "name": "patch.13214.com.square_enix.android_meta.trianglexr.obb",
+   "required": true,
+   "role": "content-bundle",
+   "size": 3144128580,
+   "sha256": "14892b074c9ed2a099c1776e466e74ad1107ef4577eb3b133c4a490ef80ae32c"
+  }
+ ],
+ "id": "store-5340130476095884",
+ "package": "com.square_enix.android_meta.trianglexr",
+ "schema": 1,
+ "status": {
+  "playability": "verified",
+  "download": "proven",
+  "notes": [
+   {
+    "en": "Marked as verified by the project on 2026-10-13. File list as Meta's tool reports it for this build; 3 of 3 checksums recorded from a download.",
+    "de": "Vom Projekt am 2026-10-13 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 3 von 3 Prüfsummen aus einem Download erfasst."
+   },
+   {
+    "en": "The game's mixed-reality mode works: your room shows around the playing field. Needs toolchain 358 or newer.",
+    "de": "Der Mixed-Reality-Modus des Spiels funktioniert: Dein Raum ist um das Spielfeld herum zu sehen. Braucht Toolchain 358 oder neuer."
+   }
+  ]
+ },
+ "store": {
+  "appId": "5340130476095884"
+ },
+ "title": "TRIANGLE STRATEGY",
+ "toolchain": {
+  "minCommit": "6c8b7c3",
+  "target": "x5340130476095884"
+ },
+ "versionCode": 13214,
+ "versionName": "1.0"
+}
