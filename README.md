@@ -81,7 +81,7 @@ recipes in [`recipes/`](recipes) are:
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
 | Beat Saber 1.40.8 | Meta Store | purchased song packs are downloaded and unlocked |
 | Moss | Meta Store | |
-| Walkabout Mini Golf | Meta Store | purchased courses are unlocked |
+| Walkabout Mini Golf | Meta Store | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network |
 | Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes |
@@ -144,6 +144,10 @@ their own recipe.
   game's page asks right away. Add-on content is downloaded only for purchases Meta confirms. Bought
   something later? **Sync DLCs** on the game's page asks again, downloads what is new and adds it to the installed
   game without building it again.
+- **Shaders ahead of time.** Where the project has a list of the shader combinations a game uses (Half-Life: Alyx,
+  Walkabout Mini Golf), the Vision Pro compiles them before the game starts – once, with a progress bar – instead
+  of one at a time in the middle of play. Such a list holds no shader code, only where each shader lies in the
+  game's files; your Mac builds the archive from your own copy of the game, and it goes to your own headset only.
 - **Requests to Meta** stop at the first unexpected answer. The app never tries a file to see whether Meta will
   serve it.
 - **Newer versions in the Meta Store:** for verified games you own, the app asks Meta which version is current –

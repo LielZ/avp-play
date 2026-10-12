@@ -525,15 +525,44 @@ public struct Installer: Sendable {
             report(L("Taken off the device: \(gone.file.title?.text ?? gone.file.name) (\(Installer.gigabytes(gone.size)) freed).",
                      "Vom Gerät genommen: \(gone.file.title?.text ?? gone.file.name) (\(Installer.gigabytes(gone.size)) frei)."))
         }
-        let items = StagePlan.plan(local: local, remote: remote)
+        var items = StagePlan.plan(local: local, remote: remote)
         let staged = local.filter { StagePlan.destination(for: $0.file) != nil }.count
+        // Für die Zeile „… liegen dort schon“: die Dateien des Rezepts, ohne was unten noch dazukommt.
+        let recipeItems = items.count
+        // Die Liste der Shader-Kombinationen, wo die Toolchain für das Spiel eine mitbringt: Aus ihr und den eigenen
+        // Dateien des Spiels entsteht hier das Archiv, das die Brille vor dem Start übersetzt – damit ein Shader nicht
+        // erst in dem Moment übersetzt wird, in dem das Spiel ihn zum ersten Mal braucht, und das Bild dafür stehen
+        // bleibt. Scheitert das, wird trotzdem installiert; dann ist es wie bisher.
+        do {
+            if let list = try toolchain.pipelineList(recipe: recipe, gameFiles: store.directory(for: recipe)) {
+                var there: [String: Int64] = [:]
+                for f in (try? control.files(device: device, bundle: bundle, subdirectory: "Documents/klfz")) ?? [] where !f.isDirectory {
+                    there[f.relativePath] = f.size
+                }
+                let name = "\(recipe.toolchain.target).foz"
+                if let size = ContentStore.fileSize(list.archive), there[name] != size {
+                    items.append(StageItem(source: list.archive, destination: "Documents/klfz/\(name)", size: size))
+                    report(L("Shader list: \(list.summary). The Vision Pro compiles them before the game's next start – a few minutes once, with a progress bar.",
+                             "Shader-Liste: \(list.summary). Die Vision Pro übersetzt sie vor dem nächsten Start des Spiels – einmalig einige Minuten, mit Fortschrittsanzeige."))
+                }
+                // Die Beschreibung seines Grafikgeräts schreibt das Spiel bei jedem Start selbst (device-info.json).
+                // Vor dem allerersten Start gibt es die noch nicht; dafür kommt eine Ersatzbeschreibung mit, unter
+                // dem Namen, unter dem die Brille eine solche sucht – sonst könnte sie erst vor dem zweiten Start
+                // übersetzen.
+                if let info = list.deviceInfo, let size = ContentStore.fileSize(info), there["device-info.default.json"] != size {
+                    items.append(StageItem(source: info, destination: "Documents/klfz/device-info.default.json", size: size))
+                }
+            }
+        } catch {
+            report(L("The shader list was left out: \(error)", "Die Shader-Liste bleibt weg: \(error)"))
+        }
         // Gemeint sind hier die Bäume eines Spiels, das kein APK ist; Datenordner eines APK-Spiels folgen weiter unten.
         let hasTrees = !TreeStore.toolchainTrees(of: recipe).isEmpty
         if staged > 0 || !hasTrees {
             let total = Installer.gigabytes(items.map(\.size).reduce(0, +))
-            report(L("Data: \(staged) files belong on the device, \(staged - items.count) are already there, "
+            report(L("Data: \(staged) files belong on the device, \(staged - recipeItems) are already there, "
                      + "\(items.count) to copy (\(total)).",
-                     "Daten: \(staged) Dateien gehören aufs Gerät, \(staged - items.count) liegen dort schon, "
+                     "Daten: \(staged) Dateien gehören aufs Gerät, \(staged - recipeItems) liegen dort schon, "
                      + "\(items.count) zu kopieren (\(total))."))
         }
         let copyStart = Date()

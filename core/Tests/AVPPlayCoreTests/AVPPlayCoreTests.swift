@@ -1403,6 +1403,35 @@ final class FailureKindTests: XCTestCase {
     }
 }
 
+final class PipelineListTests: XCTestCase {
+    /// Ohne Liste in der Toolchain gibt es nichts zu bauen; mit Liste, aber ohne Werkzeug, ebenso wenig.
+    func testAToolchainWithoutAListHasNone() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("qi-pl-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("visionos/pipelines"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("tools"), withIntermediateDirectories: true)
+        try "#!/bin/sh\n".write(to: dir.appendingPathComponent("visionos/run.sh"), atomically: true, encoding: .utf8)
+        let toolchain = try Toolchain(root: dir)
+        let recipe = try RecipeStore(directory: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("recipes")).load(id: "walkabout")
+        XCTAssertNil(toolchain.pipelineRecipe(recipe: recipe))
+        XCTAssertNil(try toolchain.pipelineList(recipe: recipe, gameFiles: dir))
+        try Data("list".utf8).write(to: dir.appendingPathComponent("visionos/pipelines/walkabout.pipelines"))
+        XCTAssertNil(toolchain.pipelineRecipe(recipe: recipe), "ohne das Werkzeug nützt die Liste nichts")
+        try Data().write(to: dir.appendingPathComponent("tools/unity_pipelines.py"))
+        XCTAssertEqual(toolchain.pipelineRecipe(recipe: recipe)?.lastPathComponent, "walkabout.pipelines")
+    }
+
+    /// Je Stand der Liste ein Archiv: Eine geänderte Liste bekommt einen anderen Namen und wird neu gebaut.
+    func testTheArchiveIsNamedAfterTheListsContent() {
+        let a = Toolchain.pipelineArchiveName(target: "walkabout", recipeData: Data("one".utf8))
+        let b = Toolchain.pipelineArchiveName(target: "walkabout", recipeData: Data("two".utf8))
+        XCTAssertNotEqual(a, b)
+        XCTAssertEqual(a, Toolchain.pipelineArchiveName(target: "walkabout", recipeData: Data("one".utf8)))
+        XCTAssertTrue(a.hasPrefix("walkabout-") && a.hasSuffix(".foz") && a.count == "walkabout-".count + 16 + 4)
+    }
+}
+
 final class OwnershipCacheTests: XCTestCase {
     func testAnswersAreKeptAndGoStaleAfterADay() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("qi-own-\(UUID().uuidString)", isDirectory: true)

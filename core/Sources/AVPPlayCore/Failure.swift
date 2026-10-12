@@ -49,7 +49,7 @@ public enum FailureKind: String, Codable, Sendable {
         case let e as ToolchainError:
             switch e {
             case .buildFailed: return .build
-            case .syncFailed: return .copy
+            case .syncFailed, .pipelineListFailed: return .copy
             case .installFailed: return .device
             case .refused(let refusal, _, _):
                 switch refusal {

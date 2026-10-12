@@ -6,6 +6,8 @@ public enum ToolchainError: Error, CustomStringConvertible {
     case buildFailed(log: URL, hint: String)
     case syncFailed(log: URL, hint: String)
     case installFailed(log: URL, hint: String)
+    /// Die Liste der Shader-Kombinationen ließ sich nicht aus den Dateien des Spiels bauen.
+    case pipelineListFailed(String)
     /// macOS hat `codesign` den Signierschlüssel nicht benutzen lassen.
     case signingBlocked(String)
     /// Apple hat das Signieren oder Installieren abgelehnt, aus einem Grund, der sich am Wortlaut erkennen lässt
@@ -19,6 +21,9 @@ public enum ToolchainError: Error, CustomStringConvertible {
         case .signingBlocked(let detail):
             return L("macOS did not let this Mac sign with your developer key (\(detail)). Try again; when macOS asks, type your Mac password and click “Always Allow” with the mouse.",
                      "macOS hat diesem Mac nicht erlaubt, mit deinem Entwicklerschlüssel zu signieren (\(detail)). Versuche es erneut; wenn macOS fragt, gib dein Mac-Passwort ein und klicke mit der Maus auf „Immer erlauben“.")
+        case .pipelineListFailed(let detail):
+            return L("The game's shader list could not be built from its files (\(detail)).",
+                     "Die Shader-Liste des Spiels ließ sich nicht aus seinen Dateien bauen (\(detail)).")
         case .notAToolchain(let p): return L("There is no toolchain at \(p) (visionos/run.sh is missing).", "Unter \(p) liegt keine Toolchain (visionos/run.sh fehlt).")
         case .tooOld(let have, let need):
             return L("The toolchain (\(have)) is older than the recipe requires (\(need)).",
@@ -347,6 +352,84 @@ public struct Toolchain: Sendable {
             let hint = text.split(separator: "\n").last { $0.contains("!!") }
             throw ToolchainError.syncFailed(log: log, hint: hint.map { String($0.prefix(160)) } ?? "")
         }
+    }
+
+    // MARK: Pipeline-Liste
+
+    /// Was aus der Pipeline-Liste eines Spiels aufs Gerät gehört.
+    public struct PipelineList: Sendable {
+        /// Das Archiv, auf diesem Mac aus der Liste und den Dateien des Spiels gebaut.
+        public let archive: URL
+        /// Die Gerätebeschreibung, mit der die Brille das Archiv schon vor dem ersten Start des Spiels übersetzen kann.
+        public let deviceInfo: URL?
+        /// Die Zeile, mit der das Werkzeug sagt, was es gefunden hat.
+        public let summary: String
+    }
+
+    /// Die Liste der Shader-Kombinationen, die die Toolchain für dieses Spiel mitbringt (`visionos/pipelines/
+    /// <Target>.pipelines`) – oder `nil`, wenn sie für das Spiel keine hat.
+    ///
+    /// Die Liste nennt nur, welche Shader in welcher Kombination gebraucht werden und wo jeder in den Dateien des
+    /// Spiels steht; die Shader-Programme selbst sind Spielinhalt und stehen nicht darin.
+    public func pipelineRecipe(recipe: Recipe) -> URL? {
+        let list = root.appendingPathComponent("visionos/pipelines/\(recipe.toolchain.target).pipelines")
+        let tool = root.appendingPathComponent("tools/unity_pipelines.py")
+        let fm = FileManager.default
+        return fm.fileExists(atPath: list.path) && fm.fileExists(atPath: tool.path) ? list : nil
+    }
+
+    /// Unter welchem Namen das gebaute Archiv im Ordner des Spiels liegt: je Stand der Liste eines.
+    public static func pipelineArchiveName(target: String, recipeData: Data) -> String {
+        "\(target)-\(Hashing.sha256(of: recipeData).prefix(16)).foz"
+    }
+
+    /// Baut aus der Liste und den Dateien des Spiels in `gameFiles` das Archiv, das die Brille vor dem Start
+    /// übersetzt – einmal je Stand der Liste; danach liegt es im Ordner des Spiels (`.pipelines/`). `nil`, wenn die
+    /// Toolchain für das Spiel keine Liste hat. Die Shader-Programme kommen aus der eigenen Kopie des Spiels und
+    /// verlassen den Mac nur in Richtung der eigenen Brille.
+    public func pipelineList(recipe: Recipe, gameFiles: URL) throws -> PipelineList? {
+        guard let list = pipelineRecipe(recipe: recipe) else { return nil }
+        let data = try Data(contentsOf: list)
+        let folder = gameFiles.appendingPathComponent(".pipelines", isDirectory: true)
+        let archive = folder.appendingPathComponent(Toolchain.pipelineArchiveName(target: recipe.toolchain.target, recipeData: data))
+        let note = archive.appendingPathExtension("txt")
+        let info = root.appendingPathComponent("visionos/pipelines/\(recipe.toolchain.target).device-info.json")
+        let deviceInfo = FileManager.default.fileExists(atPath: info.path) ? info : nil
+        if FileManager.default.fileExists(atPath: archive.path), let summary = try? String(contentsOf: note, encoding: .utf8) {
+            return PipelineList(archive: archive, deviceInfo: deviceInfo, summary: summary)
+        }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Ältere Stände derselben Liste braucht niemand mehr.
+        for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where old.lastPathComponent.hasPrefix("\(recipe.toolchain.target)-") {
+            try? FileManager.default.removeItem(at: old)
+        }
+        let partial = folder.appendingPathComponent(".building-\(UUID().uuidString).foz")
+        defer { try? FileManager.default.removeItem(at: partial) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [root.appendingPathComponent("tools/unity_pipelines.py").path, "build", list.path, gameFiles.path, partial.path]
+        p.currentDirectoryURL = root
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        p.environment = env
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = out
+        p.standardInput = FileHandle.nullDevice
+        try p.run()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        guard p.terminationStatus == 0, FileManager.default.fileExists(atPath: partial.path) else {
+            throw ToolchainError.pipelineListFailed(String(text.suffix(300)))
+        }
+        // Die letzte Zeile nennt, wie viele Shader in dieser Kopie des Spiels gefunden wurden; der Pfad davor ist der
+        // vorläufige Name und sagt niemandem etwas.
+        let last = text.split(separator: "\n").last.map(String.init) ?? ""
+        let summary = last.range(of: ": ").map { String(last[$0.upperBound...]) } ?? last
+        try FileManager.default.moveItem(at: partial, to: archive)
+        try? summary.write(to: note, atomically: true, encoding: .utf8)
+        return PipelineList(archive: archive, deviceInfo: deviceInfo, summary: summary)
     }
 
     static func capture(_ argv: [String]) throws -> String {
