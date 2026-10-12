@@ -20,6 +20,11 @@ public enum StoreUpdate {
         drafts.appendingPathComponent("latest-\(recipeId).json")
     }
 
+    /// Die Datei, in der das Rezept einer bestimmten, vom Nutzer gewählten Store-Fassung liegt.
+    public static func url(drafts: URL, recipeId: String, versionCode: Int) -> URL {
+        drafts.appendingPathComponent("version-\(recipeId)-\(versionCode).json")
+    }
+
     /// Das Rezept der neuesten Fassung, angeordnet wie das geprüfte.
     ///
     /// Jede Datei des neuen Builds nimmt den Platz ihres Gegenstücks ein: bei gleichem Namen dessen Rolle und
@@ -107,9 +112,11 @@ public enum StoreUpdate {
                 return moved
             }
         }
+        // Die gewählte Fassung muss nicht die neuere sein: Wer eine ältere wählt, bekommt denselben Hinweis ohne das Wort.
+        let (enAge, deAge) = build.versionCode > tested.versionCode ? ("this newer one", "diese neuere") : ("this one", "diese")
         recipe.status = .init(playability: "untested", download: "listed", notes: [
-            LocalizedText(en: "Version \(build.version) from the Meta Store. The project tested \(tested.versionName); this newer one has not been tested with AVP Play. It may not start, and add-on content may stay locked. You can go back to the tested version at any time.",
-                          de: "Fassung \(build.version) aus dem Meta-Store. Geprüft hat das Projekt \(tested.versionName); diese neuere ist mit AVP Play nicht getestet. Sie startet vielleicht nicht, und Zusatzinhalte bleiben vielleicht gesperrt. Zur geprüften Fassung kommst du jederzeit zurück.")
+            LocalizedText(en: "Version \(build.version) from the Meta Store. The project tested \(tested.versionName); \(enAge) has not been tested with AVP Play. It may not start, and add-on content may stay locked. You can go back to the tested version at any time.",
+                          de: "Fassung \(build.version) aus dem Meta-Store. Geprüft hat das Projekt \(tested.versionName); \(deAge) ist mit AVP Play nicht getestet. Sie startet vielleicht nicht, und Zusatzinhalte bleiben vielleicht gesperrt. Zur geprüften Fassung kommst du jederzeit zurück.")
         ])
         try recipe.validate()
         return recipe
@@ -120,8 +127,27 @@ public enum StoreUpdate {
     /// Für welche Spiele die neueste Fassung statt der geprüften gewählt ist. Eine kleine Datei bei den Daten des
     /// Programms, damit App, Kommandozeile und der Dienst, der Signaturen erneuert, dasselbe Rezept nehmen.
     public struct Choices: Codable, Sendable, Equatable {
+        /// Spiele, für die „die neueste aus dem Store“ gewählt ist (die Wahl aus der Zeit vor der Liste der Fassungen).
         public var latest: Set<String>
-        public init(latest: Set<String> = []) { self.latest = latest }
+        /// Spiele, für die eine bestimmte Fassung gewählt ist: Kennung des Rezepts → Versionscode. Geht `latest` vor.
+        public var versions: [String: Int]
+        public init(latest: Set<String> = [], versions: [String: Int] = [:]) {
+            self.latest = latest
+            self.versions = versions
+        }
+
+        // Eine Datei aus der Zeit vor `versions` nennt nur `latest`; sie gilt weiter.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            latest = try c.decodeIfPresent(Set<String>.self, forKey: .latest) ?? []
+            versions = try c.decodeIfPresent([String: Int].self, forKey: .versions) ?? [:]
+        }
+
+        /// Wählt für ein Spiel eine Fassung; `nil` heißt: die, die ohne Wahl gilt.
+        public mutating func choose(_ versionCode: Int?, for recipeId: String) {
+            latest.remove(recipeId)
+            versions[recipeId] = versionCode
+        }
 
         public static var url: URL { DataLocation.base.appendingPathComponent("store-updates.json") }
 
@@ -140,15 +166,33 @@ public enum StoreUpdate {
         }
     }
 
-    /// Die Rezepte, mit denen gearbeitet wird: das geprüfte, oder – wo gewählt und vorhanden – das der neuesten
-    /// Fassung. Ein Rezept der neuesten Fassung gilt nur, wenn es zum selben Spiel gehört, wirklich neuer ist und
-    /// das Spiel nicht bei seiner Fassung bleiben soll; sonst bleibt es beim geprüften.
-    public static func resolve(_ shipped: [Recipe], drafts: URL, choices: Choices = .load()) -> [Recipe] {
+    /// Die Rezepte, mit denen gearbeitet wird: je Spiel das, das ohne Wahl gilt, oder – wo gewählt und vorhanden –
+    /// das der gewählten Fassung.
+    ///
+    /// Gewählt werden kann eine weitere geprüfte Fassung (`variants`, eigene Rezepte des Projekts) oder eine
+    /// Fassung aus dem Store, zu der ein Rezept nachgeschlagen wurde (`version-<Kennung>-<Code>.json` bei den
+    /// Entwürfen, oder aus der Zeit davor `latest-<Kennung>.json` für „die neueste“). Ein nachgeschlagenes Rezept
+    /// gilt nur, wenn es zum selben Spiel und zum selben Eintrag der Toolchain gehört; ein Spiel, das bei seiner
+    /// Fassung bleiben soll, bleibt dabei. Was sich nicht auflösen lässt, fällt auf das Rezept ohne Wahl zurück.
+    public static func resolve(_ shipped: [Recipe], variants: [Recipe] = [], drafts: URL, choices: Choices = .load()) -> [Recipe] {
         shipped.map { tested in
-            guard choices.latest.contains(tested.id), tested.store.pinned != true,
+            guard tested.store.pinned != true else { return tested }
+            func same(_ other: Recipe) -> Bool {
+                other.id == tested.id && other.store.appId == tested.store.appId && other.toolchain.target == tested.toolchain.target
+            }
+            if let code = choices.versions[tested.id] {
+                if code == tested.versionCode { return tested }
+                if let verified = variants.first(where: { $0.id == tested.id && $0.versionCode == code }) { return verified }
+                for file in [url(drafts: drafts, recipeId: tested.id, versionCode: code), url(drafts: drafts, recipeId: tested.id)] {
+                    if let looked = try? RecipeStore(directory: drafts).load(url: file), same(looked), looked.versionCode == code {
+                        return looked
+                    }
+                }
+                return tested
+            }
+            guard choices.latest.contains(tested.id),
                   let newest = try? RecipeStore(directory: drafts).load(url: url(drafts: drafts, recipeId: tested.id)),
-                  newest.id == tested.id, newest.store.appId == tested.store.appId,
-                  newest.toolchain.target == tested.toolchain.target, newest.versionCode > tested.versionCode else { return tested }
+                  same(newest), newest.versionCode > tested.versionCode else { return tested }
             return newest
         }
     }

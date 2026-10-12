@@ -184,7 +184,13 @@ extension AppModel {
     /// Ergebnis liegt danach als Rezeptentwurf auf dem Mac. Beim ersten unerwarteten Ergebnis ist Schluss.
     func prepare(_ game: Game) {
         guard game.draft, let entry = game.catalog, !preparing.contains(game.id) else { return }
-        if game.prepared, game.recipe.versionCode == (entry.build?.versionCode ?? game.recipe.versionCode) {
+        // Hat der Nutzer eine bestimmte Fassung gewählt, wird die nachgeschlagen und nicht der neueste Build; sie
+        // bleibt, auch wenn der Store inzwischen einen neueren führt. Kennt die App den gewählten Build (noch) nicht,
+        // bleibt der Entwurf, wie er ist.
+        let chosenCode = latestChoices.versions[game.id]
+        let chosen = chosenCode.flatMap { code in (storeBuildLists[game.id] ?? []).first { $0.versionCode == code } }
+        if chosenCode != nil, chosen == nil, game.prepared { return }
+        if game.prepared, game.recipe.versionCode == (chosen?.versionCode ?? entry.build?.versionCode ?? game.recipe.versionCode) {
             // Fertig nachgeschlagen – es sei denn, der Entwurf baut noch mit dem allgemeinen Versuchs-Target und die
             // Toolchain kennt das Spiel inzwischen unter eigenem Namen: dann wird der Entwurf neu geschrieben.
             let named = entry.target.flatMap { $0.isEmpty || toolchain?.targetKind($0) == nil ? nil : $0 }
@@ -204,7 +210,8 @@ extension AppModel {
         // Versuchs-Target und noch keinen Mindeststand; beides wird nachgetragen, sobald gebaut wird.
         let toolchain = toolchain
         preparing.insert(game.id)
-        prepareNote[game.id] = L("Looking up the newest build …", "Der neueste Build wird nachgeschlagen …")
+        prepareNote[game.id] = chosen.map { L("Looking up version \($0.version) …", "Fassung \($0.version) wird nachgeschlagen …") }
+            ?? L("Looking up the newest build …", "Der neueste Build wird nachgeschlagen …")
         let client = catalogClient
         let paths = paths
         let drafts = draftsDirectory
@@ -215,7 +222,7 @@ extension AppModel {
             var note: String?
             do {
                 let detail = try await client.game(appId: entry.appId)
-                guard let build = detail.build else {
+                guard let build = chosen ?? detail.build else {
                     throw Stop(L("No public build of this game is known yet.", "Zu diesem Spiel ist noch kein öffentlicher Build bekannt."))
                 }
                 await say(L("Asking Meta whether you own this game …", "Meta wird gefragt, ob dir das Spiel gehört …"))

@@ -14,8 +14,12 @@ struct Game: Identifiable {
     var catalog: CatalogGame?
     /// Kein mitgeliefertes Rezept, sondern ein Entwurf aus Katalog und Metas Werkzeug – oder erst ein Platzhalter.
     var draft = false
-    /// Gesetzt, wenn statt der geprüften Fassung die neueste aus dem Store gewählt ist: der Name der geprüften.
+    /// Gesetzt, wenn statt einer geprüften Fassung eine ungetestete aus dem Store gewählt ist: der Name der Fassung,
+    /// die ohne Wahl gilt.
     var testedVersion: String?
+    /// Die Fassungen, zu denen das Projekt ein eigenes Rezept führt: zuerst die, die ohne Wahl gilt, dann weitere.
+    /// Leer bei einem Spiel ohne mitgeliefertes Rezept.
+    var verifiedVersions: [GameVersion] = []
     var id: String { recipe.id }
     /// Sind die Dateien des Spiels bekannt? Bei einem Platzhalter noch nicht.
     var prepared: Bool { !draft || !recipe.files.isEmpty }
@@ -189,6 +193,9 @@ final class AppModel: ObservableObject {
     @AppStorage("storePictures") var storePictures = true
     /// Der aktuelle Build geprüfter Store-Spiele, wie der Katalog ihn kennt (Kennung des Rezepts → Build).
     @Published var storeBuilds: [String: CatalogBuild] = [:]
+    /// Alle Fassungen, die der Store zu einem Spiel des Kontos nennt, die neueste zuerst (Kennung des Rezepts →
+    /// Builds). Nur wo Meta selbst gefragt wurde; sonst kennt die App nur den einen Build des Katalogs.
+    @Published var storeBuildLists: [String: [CatalogBuild]] = [:]
     /// Für welche Spiele die neueste Fassung aus dem Store statt der geprüften gewählt ist.
     @Published var latestChoices = StoreUpdate.Choices.load()
     /// Ältere Toolchains von selbst entfernen, sobald eine neuere installiert ist und nichts mehr mit ihnen baut.

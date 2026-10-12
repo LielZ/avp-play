@@ -372,17 +372,53 @@ struct StoreVersionBox: View {
     @EnvironmentObject var model: AppModel
     let game: Game
 
+    private func label(_ v: GameVersion) -> String {
+        switch (v.kind, v.isDefault) {
+        case (.verified, true): return L("\(v.versionName) – verified, recommended", "\(v.versionName) – geprüft, empfohlen")
+        case (.verified, false): return L("\(v.versionName) – verified", "\(v.versionName) – geprüft")
+        case (.store, true): return L("\(v.versionName) – newest in the store", "\(v.versionName) – neueste im Store")
+        case (.store, false): return L("\(v.versionName) – untested", "\(v.versionName) – ungetestet")
+        }
+    }
+
     var body: some View {
         let newer = model.storeUpdate(for: game)
-        if newer != nil || game.testedVersion != nil {
+        let versions = model.versions(for: game)
+        if newer != nil || game.testedVersion != nil || versions.count > 1 {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
+                    // Die Wahl der Fassung: oben die mit eigenem Rezept des Projekts, darunter, was der Store sonst nennt.
+                    if versions.count > 1 {
+                        let verified = versions.filter { $0.kind == .verified }
+                        let others = versions.filter { $0.kind == .store }
+                        Picker(L("Version", "Fassung"), selection: Binding(
+                            get: { game.recipe.versionCode },
+                            set: { model.chooseVersion(game, versionCode: $0) })) {
+                            if !verified.isEmpty {
+                                Section(L("Verified by the project", "Vom Projekt geprüft")) {
+                                    ForEach(verified) { Text(label($0)).tag($0.versionCode) }
+                                }
+                            }
+                            if !others.isEmpty {
+                                Section(verified.isEmpty ? L("From the Meta Store", "Aus dem Meta-Store")
+                                                         : L("Other versions from the Meta Store – not tested with AVP Play",
+                                                             "Weitere Fassungen aus dem Meta-Store – mit AVP Play nicht getestet")) {
+                                    ForEach(others) { Text(label($0)).tag($0.versionCode) }
+                                }
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 460, alignment: .leading)
+                        .disabled(model.preparing.contains(game.id))
+                        .help(L("Which version is downloaded and installed. Changing it changes nothing on the Vision Pro until you install.",
+                                "Welche Fassung geladen und installiert wird. Ein Wechsel ändert nichts auf der Vision Pro, bis du installierst."))
+                    }
                     if let tested = game.testedVersion {
                         Label(L("You are using version \(game.recipe.versionName) from the Meta Store – not tested with AVP Play",
                                 "Du verwendest Fassung \(game.recipe.versionName) aus dem Meta-Store – mit AVP Play nicht getestet"),
                               systemImage: "exclamationmark.triangle").font(.headline).foregroundStyle(.orange)
-                        Text(L("The project tested version \(tested). This newer one may not start, may show errors, and add-on content may stay locked. If it works, say so with the feedback buttons below – that is how others learn of it. Your saved games stay on the Vision Pro either way.",
-                               "Geprüft hat das Projekt Fassung \(tested). Diese neuere startet vielleicht nicht, zeigt vielleicht Fehler, und Zusatzinhalte bleiben vielleicht gesperrt. Wenn sie läuft, melde das mit den Knöpfen unten – so erfahren es die anderen. Deine Spielstände bleiben in beiden Fällen auf der Vision Pro."))
+                        Text(L("The project tested version \(tested). This one may not start, may show errors, and add-on content may stay locked. If it works, say so with the feedback buttons below – that is how others learn of it. Your saved games stay on the Vision Pro either way.",
+                               "Geprüft hat das Projekt Fassung \(tested). Diese startet vielleicht nicht, zeigt vielleicht Fehler, und Zusatzinhalte bleiben vielleicht gesperrt. Wenn sie läuft, melde das mit den Knöpfen unten – so erfahren es die anderen. Deine Spielstände bleiben in beiden Fällen auf der Vision Pro."))
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack {
                             Button(L("Go Back to Tested Version \(tested)", "Zurück zur geprüften Fassung \(tested)")) { model.useTestedVersion(game) }
@@ -406,7 +442,7 @@ struct StoreVersionBox: View {
                         }
                         .disabled(model.preparing.contains(game.id))
                     }
-                    if model.preparing.contains(game.id) {
+                    if model.preparing.contains(game.id), !game.draft {
                         HStack { ProgressView().controlSize(.small); Text(model.prepareNote[game.id] ?? "").font(.callout) }
                     } else if !game.draft, let note = model.prepareNote[game.id] {
                         Label(note, systemImage: "info.circle").font(.callout).fixedSize(horizontal: false, vertical: true)

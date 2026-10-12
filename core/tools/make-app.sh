@@ -25,6 +25,11 @@ cp "$BIN" "$NEW/Contents/MacOS/AVPPlay"
 mkdir -p "$NEW/Contents/Helpers"
 cp ".build-app/release/avpplay" "$NEW/Contents/Helpers/avpplay"
 cp "$ROOT"/recipes/*.json "$NEW/Contents/Resources/recipes/"
+# Weitere geprüfte Fassungen einzelner Spiele (RecipeStore.loadVariants), soweit es welche gibt.
+if ls "$ROOT"/recipes/versions/*.json >/dev/null 2>&1; then
+  mkdir -p "$NEW/Contents/Resources/recipes/versions"
+  cp "$ROOT"/recipes/versions/*.json "$NEW/Contents/Resources/recipes/versions/"
+fi
 # Die Toolchain kommt mit: das neueste Paket aus dist/ samt Beschreibung (oder AVPPLAY_TOOLCHAIN_ARCHIVE).
 # Die App installiert es beim ersten Start – geprüft gegen die Beschreibung wie jedes andere Paket.
 # Ohne Archiv in dist/ scheitert das `ls` – unter `set -e` samt pipefail würde die Zuweisung das Skript stillschweigend

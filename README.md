@@ -150,12 +150,15 @@ their own recipe.
   game's files; your Mac builds the archive from your own copy of the game, and it goes to your own headset only.
 - **Requests to Meta** stop at the first unexpected answer. The app never tries a file to see whether Meta will
   serve it.
-- **Newer versions in the Meta Store:** for verified games you own, the app asks Meta which version is current –
-  at most once in twenty hours per game, with the query the store's own apps use (it is not a documented
-  developer interface) – and offers it next to the tested one, as your choice and marked as untested. Files that
-  did not change between two versions are taken from the copy on your Mac instead of being downloaded again.
-  Beat Saber's song packs move to the newer version with it; songs that are newer than the tested version are
-  not fetched until the project has tested a version that has them.
+- **Which version of a game:** a game's page has a menu of versions. At the top are the ones the project has
+  tested and keeps a recipe for – the recommended one, and for some games an earlier one (Beat Saber 1.40.8
+  beside 1.45) – and below them the other versions the Meta Store names for a game you own, marked as untested.
+  For that list the app asks Meta which versions there are – at most once in twenty hours per verified game, and
+  for other games when you open their page – with the query the store's own apps use (it is not a documented
+  developer interface). Nothing changes on the headset until you install. Files that did not change between two
+  versions are taken from the copy on your Mac instead of being downloaded again. Beat Saber's song packs move to
+  another version with it; songs that are newer than the tested version are not fetched until the project has
+  tested a version that has them.
 - **Apple signing** uses the team you are signed in with in Xcode. The app reads the list of teams from Xcode's
   settings and nothing else.
 - **The project's own service** (`avpplay.martek.de`) holds the list of further games and what users report about

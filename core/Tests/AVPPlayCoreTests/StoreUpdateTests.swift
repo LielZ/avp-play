@@ -96,6 +96,92 @@ final class StoreUpdateTests: XCTestCase {
         XCTAssertEqual(wanted.first { $0.role == "addon" }?.id, "40000000000000004")
     }
 
+    func testAChosenVersionIsAVerifiedOneOrALookedUpOneOrTheDefault() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("avpplay-versions-\(UUID().uuidString)", isDirectory: true)
+        let drafts = dir.appendingPathComponent("drafts", isDirectory: true)
+        try FileManager.default.createDirectory(at: drafts, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let encoder = JSONEncoder()
+        let current = tested()                                  // 6.7, Code 60366: gilt ohne Wahl
+        var older = current                                      // eine weitere geprüfte Fassung, älter
+        older.versionName = "6.5"; older.versionCode = 60100
+        var looked = current                                     // aus dem Store nachgeschlagen, ungetestet
+        looked.versionName = "6.6"; looked.versionCode = 60200
+        looked.status = .init(playability: "untested", download: "listed", notes: nil)
+        try encoder.encode(looked).write(to: StoreUpdate.url(drafts: drafts, recipeId: "golf", versionCode: 60200))
+        func code(_ choices: StoreUpdate.Choices, variants: [Recipe] = [older]) -> Int? {
+            StoreUpdate.resolve([current], variants: variants, drafts: drafts, choices: choices).first?.versionCode
+        }
+        XCTAssertEqual(code(.init()), 60366, "ohne Wahl die Fassung des Rezepts")
+        XCTAssertEqual(code(.init(versions: ["golf": 60100])), 60100, "eine weitere geprüfte Fassung – auch eine ältere")
+        XCTAssertEqual(StoreUpdate.resolve([current], variants: [older], drafts: drafts, choices: .init(versions: ["golf": 60100])).first?.status.playability,
+                       "verified")
+        XCTAssertEqual(code(.init(versions: ["golf": 60200])), 60200, "eine nachgeschlagene aus dem Store")
+        XCTAssertEqual(code(.init(versions: ["golf": 60366])), 60366, "die Fassung ohne Wahl, ausdrücklich gewählt")
+        XCTAssertEqual(code(.init(versions: ["golf": 60999])), 60366, "eine Wahl ohne Rezept fällt zurück")
+        XCTAssertEqual(code(.init(versions: ["golf": 60100]), variants: []), 60366, "ein geprüftes Rezept, das es nicht mehr gibt, auch")
+        XCTAssertEqual(code(.init(versions: ["other": 60100])), 60366, "die Wahl gilt je Spiel")
+        // Ein nachgeschlagenes Rezept eines anderen Spiels unter diesem Namen gilt nicht.
+        var foreign = looked
+        foreign.store = .init(appId: "9999999999")
+        foreign.versionCode = 60300
+        try encoder.encode(foreign).write(to: StoreUpdate.url(drafts: drafts, recipeId: "golf", versionCode: 60300))
+        XCTAssertEqual(code(.init(versions: ["golf": 60300])), 60366)
+        // Ein Spiel, das bei seiner Fassung bleiben soll, bleibt dabei.
+        var pinned = current
+        pinned.store.pinned = true
+        XCTAssertEqual(StoreUpdate.resolve([pinned], variants: [older], drafts: drafts, choices: .init(versions: ["golf": 60100])).first?.versionCode, 60366)
+        // Die Wahl „die neueste“ aus der Zeit vor der Liste gilt weiter, und eine bestimmte Fassung geht ihr vor.
+        var newest = current
+        newest.versionName = "6.9"; newest.versionCode = 60500
+        try encoder.encode(newest).write(to: StoreUpdate.url(drafts: drafts, recipeId: "golf"))
+        XCTAssertEqual(code(.init(latest: ["golf"])), 60500)
+        XCTAssertEqual(code(.init(latest: ["golf"], versions: ["golf": 60100])), 60100)
+        XCTAssertEqual(code(.init(versions: ["golf": 60500])), 60500, "…und ihr Rezept lässt sich auch als bestimmte Fassung wählen")
+    }
+
+    func testTheStoredChoiceReadsAFileFromBeforeVersionsAndChoosingReplacesNewest() throws {
+        let old = try JSONDecoder().decode(StoreUpdate.Choices.self, from: Data(#"{"latest":["walkabout"]}"#.utf8))
+        XCTAssertEqual(old.latest, ["walkabout"])
+        XCTAssertEqual(old.versions, [:])
+        var choices = old
+        choices.choose(1716, for: "walkabout")
+        XCTAssertEqual(choices.versions, ["walkabout": 1716])
+        XCTAssertFalse(choices.latest.contains("walkabout"), "eine bestimmte Fassung ersetzt „die neueste“")
+        choices.choose(nil, for: "walkabout")
+        XCTAssertEqual(choices, StoreUpdate.Choices())
+        let round = try JSONDecoder().decode(StoreUpdate.Choices.self, from: JSONEncoder().encode(StoreUpdate.Choices(versions: ["a": 2])))
+        XCTAssertEqual(round.versions, ["a": 2])
+    }
+
+    func testFurtherVerifiedVersionsAreReadFromTheirFolderByNameAndCode() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("avpplay-variants-\(UUID().uuidString)", isDirectory: true)
+        let folder = dir.appendingPathComponent(RecipeStore.variantsFolder, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let encoder = JSONEncoder()
+        var a = tested(); a.versionCode = 60100
+        var b = tested(); b.versionCode = 60200
+        try encoder.encode(a).write(to: folder.appendingPathComponent("golf-60100.json"))
+        try encoder.encode(b).write(to: folder.appendingPathComponent("golf-60200.json"))
+        try encoder.encode(b).write(to: folder.appendingPathComponent("golf-1.json"))          // der Name nennt einen anderen Code
+        try Data("{".utf8).write(to: folder.appendingPathComponent("golf-60300.json"))           // nicht lesbar
+        try encoder.encode(tested()).write(to: dir.appendingPathComponent("golf.json"))         // die ohne Wahl: kein Teil davon
+        let store = RecipeStore(directory: dir)
+        XCTAssertEqual(store.loadVariants().map(\.versionCode), [60200, 60100], "die neueste zuerst")
+        XCTAssertEqual(try store.loadAll().map(\.versionCode), [60366], "der Ordner selbst führt weiter nur die eine je Spiel")
+        XCTAssertTrue(RecipeStore(directory: folder).loadVariants().isEmpty, "ohne Unterordner gibt es keine")
+    }
+
+    func testMetasAnswerNamesEveryVersionNewestFirst() {
+        let answer = Data(#"{"data":{"node":{"supportedBinaries":{"edges":[{"node":{"version":"6.7","versionCode":60366,"id":"27353254667689625"}},{"node":{"version":"6.8","versionCode":62568,"id":"28028576350157450"}},{"node":{"version":"6.8 again","versionCode":62568,"id":"28028576350157451"}},{"node":{"version":"x","versionCode":99999999,"id":"not-a-number"}},{"node":{"version":"6.5","versionCode":60100,"id":"27000000000000001"}},{"node":null}]}}}}"#.utf8)
+        let builds = MetaClient.builds(inAnswer: answer)
+        XCTAssertEqual(builds.map(\.versionCode), [62568, 60366, 60100])
+        XCTAssertEqual(builds.map(\.version), ["6.8", "6.7", "6.5"], "je Versionsnummer ein Build")
+        XCTAssertEqual(MetaClient.newestBuild(inAnswer: answer)?.buildId, builds.first?.buildId)
+        XCTAssertTrue(MetaClient.builds(inAnswer: Data(#"{"errors":[{"message":"x"}]}"#.utf8)).isEmpty)
+    }
+
     func testMetasAnswerIsReadForItsNewestBuildAndNothingElse() {
         let answer = Data(#"{"data":{"node":{"__typename":"Application","displayName":"Golf","supportedBinaries":{"edges":[{"node":{"__typename":"AndroidBinary","changeLog":null,"version":"6.7","versionCode":60366,"id":"27353254667689625"}},{"node":{"__typename":"AndroidBinary","version":"6.8","versionCode":62568,"id":"28028576350157450"}},{"node":{"version":"x","versionCode":99999999,"id":"not-a-number"}},{"node":null}]}}}}"#.utf8)
         let newest = MetaClient.newestBuild(inAnswer: answer)

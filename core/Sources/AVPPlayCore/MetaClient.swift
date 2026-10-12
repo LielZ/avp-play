@@ -75,15 +75,24 @@ public struct MetaClient: Sendable {
     static let currentVersionQuery = "1586217024733717"
 
     public func latestBuild(appId: String) async throws -> CatalogBuild? {
-        guard CatalogGame.isIdentifier(appId) else { return nil }
+        try await builds(appId: appId).first
+    }
+
+    /// Alle Fassungen, die Metas Antwort auf dieselbe Abfrage nennt, die neueste zuerst – für die Wahl der
+    /// Fassung. Es ist dieselbe eine Anfrage wie für `latestBuild`; gelesen werden dieselben drei Angaben je Build.
+    public func builds(appId: String) async throws -> [CatalogBuild] {
+        guard CatalogGame.isIdentifier(appId) else { return [] }
         // Der Token geht wie überall im Kopf der Anfrage mit, nie in der Adresse und nicht im Rumpf.
         let data = try await graph(path: "/graphql", form: ["doc_id": MetaClient.currentVersionQuery, "variables": "{\"id\":\"\(appId)\"}"])
-        return MetaClient.newestBuild(inAnswer: data)
+        return MetaClient.builds(inAnswer: data)
     }
 
     /// Liest aus Metas Antwort den Build mit der höchsten Nummer: `data.node.supportedBinaries.edges[].node` mit
     /// `id`, `version`, `versionCode`. Alles andere an der Antwort bleibt ungelesen.
-    static func newestBuild(inAnswer data: Data) -> CatalogBuild? {
+    static func newestBuild(inAnswer data: Data) -> CatalogBuild? { builds(inAnswer: data).first }
+
+    /// Alle brauchbaren Builds der Antwort, je Versionsnummer einer, die höchste Nummer zuerst.
+    static func builds(inAnswer data: Data) -> [CatalogBuild] {
         struct Answer: Decodable {
             struct Binary: Decodable {
                 let id: String?
@@ -96,13 +105,14 @@ public struct MetaClient: Sendable {
             struct Payload: Decodable { let node: Node? }
             let data: Payload?
         }
-        guard let edges = (try? JSONDecoder().decode(Answer.self, from: data))?.data?.node?.supportedBinaries?.edges else { return nil }
+        guard let edges = (try? JSONDecoder().decode(Answer.self, from: data))?.data?.node?.supportedBinaries?.edges else { return [] }
         let builds = edges.compactMap { edge -> CatalogBuild? in
             guard let b = edge.node, let id = b.id, CatalogGame.isIdentifier(id), let code = b.versionCode, code > 0 else { return nil }
             let build = CatalogBuild(buildId: id, version: String((b.version ?? "\(code)").prefix(60)), versionCode: code, fileName: nil)
             return build.isSane ? build : nil
         }
-        return builds.max { $0.versionCode < $1.versionCode }
+        var seen = Set<Int>()
+        return builds.sorted { $0.versionCode > $1.versionCode }.filter { seen.insert($0.versionCode).inserted }
     }
 
     /// Die vom Store bestätigten Käufe innerhalb einer App (SKUs). Abgelaufene Käufe zählen nicht.

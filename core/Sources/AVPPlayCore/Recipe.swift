@@ -314,4 +314,22 @@ public struct RecipeStore: Sendable {
         try recipe.validate()
         return recipe
     }
+
+    /// Der Unterordner mit weiteren geprüften Fassungen: `versions/<Kennung>-<Versionscode>.json`.
+    public static let variantsFolder = "versions"
+
+    /// Weitere Fassungen, zu denen das Projekt ein eigenes Rezept führt – neben der einen im Ordner selbst, die
+    /// ohne Wahl gilt. Ein Rezept hier trägt die Kennung seines Spiels und heißt nach Kennung und Versionscode;
+    /// was dazu nicht passt oder sich nicht lesen lässt, zählt nicht. Die neueste Fassung zuerst.
+    public func loadVariants() -> [Recipe] {
+        let folder = directory.appendingPathComponent(RecipeStore.variantsFolder, isDirectory: true)
+        let urls = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+        return urls.compactMap { url -> Recipe? in
+            guard let recipe = try? load(url: url),
+                  url.deletingPathExtension().lastPathComponent == "\(recipe.id)-\(recipe.versionCode)" else { return nil }
+            return recipe
+        }
+        .sorted { ($0.id, $1.versionCode) < ($1.id, $0.versionCode) }
+    }
 }

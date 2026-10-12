@@ -90,6 +90,17 @@ final class RecipeTests: XCTestCase {
         XCTAssertNil(bs.store.pinned)
         XCTAssertEqual(bs.versionCode, 3148)
         XCTAssertTrue(bs.files.allSatisfy { $0.sha256 != nil && $0.size != nil })
+        // …und die Fassung davor bleibt als weitere geprüfte wählbar: dasselbe Spiel, derselbe Eintrag der Toolchain.
+        let variants = RecipeStore(directory: dir).loadVariants()
+        let old = try XCTUnwrap(variants.first { $0.id == "beatsaber140" })
+        XCTAssertEqual(old.versionCode, 1716)
+        XCTAssertEqual(old.toolchain.target, bs.toolchain.target)
+        XCTAssertEqual(old.store.appId, bs.store.appId)
+        XCTAssertNil(old.store.pinned)
+        XCTAssertEqual(old.status.playability, "verified")
+        XCTAssertEqual(old.addons?.items?.count, 248)
+        XCTAssertTrue(variants.allSatisfy { v in all.contains { $0.id == v.id && $0.versionCode != v.versionCode } },
+                      "jede weitere Fassung gehört zu einem Spiel des Ordners und ist eine andere als dessen")
     }
 }
 
