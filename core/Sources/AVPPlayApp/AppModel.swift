@@ -595,7 +595,11 @@ final class AppModel: ObservableObject {
     }
 
     func reloadJobs() {
-        jobs = paths.jobs.all().sorted { $0.created > $1.created }
+        jobs = paths.jobs.all()
+        // Wer wartet, kommt in der Reihenfolge der Liste dran, von unten nach oben – so gilt auch, was der Nutzer
+        // dort umstellt, und nicht, in welcher Reihenfolge angeklickt wurde.
+        let order = JobStore.runOrder(of: queued, in: jobs)
+        if order != queued { queued = order }
         if selectedJob == nil || !jobs.contains(where: { $0.id == selectedJob }) { selectedJob = jobs.first?.id }
     }
 
@@ -944,9 +948,8 @@ final class AppModel: ObservableObject {
         let prefix = bundlePrefix
         if prefix != Toolchain.defaultBundlePrefix() { request.bundleId = "\(prefix).\(game.recipe.toolchain.target)" }
         do {
-            // Eingefroren wird der Stand, mit dem der Auftrag beginnt.
-            let job = Job(recipe: recipe, request: request, steps: steps, toolchainCommit: toolchain?.commit() ?? "")
-            try paths.jobs.save(job)
+            // Eingefroren wird der Stand, mit dem der Auftrag beginnt. Seinen Platz in der Reihe bekommt er dabei.
+            let job = try paths.jobs.enqueue(Job(recipe: recipe, request: request, steps: steps, toolchainCommit: toolchain?.commit() ?? ""))
             queued.append(job.id)
             reloadJobs()
             if show {
@@ -999,7 +1002,10 @@ final class AppModel: ObservableObject {
 
     func resume(_ job: Job) {
         guard job.id != runningJob, !queued.contains(job.id) else { return }
+        // Fortsetzen heißt sich anstellen. Der Platz steht im Auftrag selbst, damit Liste und Ablauf dasselbe sagen.
+        if let stored = try? paths.jobs.load(job.id) { _ = try? paths.jobs.enqueue(stored) }
         queued.append(job.id)
+        reloadJobs()
         pump()
     }
 

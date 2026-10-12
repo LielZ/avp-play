@@ -890,8 +890,8 @@ case "job":
             // Eingefroren wird der Stand, mit dem der Auftrag beginnt. Wer nur lädt, braucht keine Toolchain.
             let commit = downloadOnly ? "" : try Toolchain(root: URL(fileURLWithPath: request.toolchain)).commit()
             let steps = downloadOnly ? InstallStep.download : addonsOnly ? InstallStep.addonSync : buildOnly ? [.account, .fetch, .build] : InstallStep.allCases
-            let job = Job(recipe: r, request: request, steps: steps, toolchainCommit: commit)
-            try jobs.save(job)
+            // Auch ein Auftrag der Kommandozeile bekommt seinen Platz, sonst stünde er in der Liste unter allen anderen.
+            let job = try jobs.enqueue(Job(recipe: r, request: request, steps: steps, toolchainCommit: commit))
             print(downloadOnly ? L("Job \(job.id) created (\(r.title), download only).", "Auftrag \(job.id) angelegt (\(r.title), nur laden).")
                                : L("Job \(job.id) created (\(r.title), toolchain \(commit)).", "Auftrag \(job.id) angelegt (\(r.title), Toolchain \(commit))."))
             await run(job)

@@ -45,6 +45,11 @@ public struct Job: Codable, Sendable, Identifiable, Equatable {
     public var created: Date
     public var updated: Date
     public var attempts = 0
+    /// Der Platz in der Reihe: eine fortlaufende Nummer, vergeben, wenn der Auftrag sich anstellt; die kleinere
+    /// kommt zuerst dran. Sie hängt an keiner Uhrzeit – „angelegt“ ist nur auf die Sekunde gespeichert, und ein
+    /// Sammelauftrag legt viele Aufträge in derselben an. Nach dem Lauf bleibt sie als Platz in der Liste stehen.
+    /// Fehlt bei Aufträgen, die vor dieser Angabe gespeichert wurden.
+    public var queuePosition: Int?
 
     public init(recipe: Recipe, request: InstallRequest, steps: [InstallStep] = InstallStep.allCases,
                 toolchainCommit: String, now: Date = Date(), suffix: String = String(UUID().uuidString.prefix(4)).lowercased()) {
@@ -107,12 +112,57 @@ public struct JobStore: Sendable {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(id).log"))
     }
 
-    /// Alle Aufträge, neueste zuerst. Unlesbare Dateien werden übergangen.
+    /// Alle Aufträge in der Reihenfolge der Liste, der zuletzt angestellte zuerst. Unlesbare Dateien werden übergangen.
+    ///
+    /// Oben stehen die Aufträge mit einem Platz in der Reihe, der höchste zuerst – Wartende kommen also von unten
+    /// nach oben dran. Darunter folgen die von früher, die noch keinen Platz kennen, der neueste zuerst. Bei
+    /// gleichem Stand entscheidet die Kennung: Der Ordner nennt seine Dateien in keiner festen Reihenfolge, und die
+    /// Liste soll nicht davon abhängen.
     public func all() -> [Job] {
         let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "json" }
             .compactMap { try? load($0.deletingPathExtension().lastPathComponent) }
-            .sorted { $0.created > $1.created }
+            .sorted { a, b in
+                switch (a.queuePosition, b.queuePosition) {
+                case let (x?, y?) where x != y: return x > y
+                case (_?, nil): return true
+                case (nil, _?): return false
+                default: return a.created != b.created ? a.created > b.created : a.id > b.id
+                }
+            }
+    }
+
+    /// Stellt einen Auftrag hinten an und speichert ihn: Er bekommt den Platz nach allen, die schon einen haben.
+    /// Wer seinen Platz hat und noch nie drankam (das Programm wurde beendet, während er wartete), behält ihn – so
+    /// steht die Reihe nach einem Neustart wie vorher. Wer schon einmal lief, stellt sich neu hinten an.
+    @discardableResult
+    public func enqueue(_ job: Job) throws -> Job {
+        var job = job
+        if job.queuePosition == nil || job.state != .waiting {
+            job.queuePosition = (all().compactMap(\.queuePosition).max() ?? 0) + 1
+        }
+        try save(job)
+        return job
+    }
+
+    /// Legt fest, in welcher Reihenfolge die genannten Aufträge drankommen – der erste zuerst. Sie tauschen dazu
+    /// nur untereinander die Plätze, die sie schon haben; kein anderer Auftrag rückt dabei. Unbekannte Kennungen
+    /// und Aufträge ohne Platz werden übergangen.
+    public func reorder(_ ids: [String]) throws {
+        let jobs = ids.compactMap { try? load($0) }.filter { $0.queuePosition != nil }
+        let places = jobs.compactMap(\.queuePosition).sorted()
+        for (job, place) in zip(jobs, places) where job.queuePosition != place {
+            var job = job
+            job.queuePosition = place
+            try save(job)
+        }
+    }
+
+    /// Die Wartenden in der Reihenfolge, in der sie drankommen: in der Liste von unten nach oben.
+    /// - Parameter listed: die Aufträge in der Reihenfolge der Liste, wie `all()` sie liefert.
+    public static func runOrder(of waiting: [String], in listed: [Job]) -> [String] {
+        let waiting = Set(waiting)
+        return listed.reversed().map(\.id).filter(waiting.contains)
     }
 }
 

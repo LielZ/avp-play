@@ -999,6 +999,108 @@ final class JobTests: XCTestCase {
         XCTAssertThrowsError(try store.load("../../etc/passwd")) { XCTAssertEqual($0 as? JobError, .notFound("../../etc/passwd")) }
         XCTAssertThrowsError(try store.load("gibt-es-nicht"))
     }
+
+    // MARK: Reihenfolge der Wartenden
+
+    /// Aufträge wie aus einem Sammelauftrag: alle in derselben Sekunde angelegt, und ihre Kennungen sortieren
+    /// anders, als sie angelegt wurden. Weder Uhrzeit noch Name verraten also die Reihenfolge.
+    func batch(_ suffixes: [String], like template: Job, at second: TimeInterval = 1_800_000_000) -> [Job] {
+        suffixes.map {
+            Job(recipe: template.recipe, request: template.request, toolchainCommit: "abc1234",
+                now: Date(timeIntervalSince1970: second), suffix: $0)
+        }
+    }
+
+    func testWaitingJobsAreTakenFromTheBottomOfTheListUpwards() throws {
+        let (store, template) = try setup()
+        let jobs = try batch(["m", "a", "z", "c"], like: template).map { try store.enqueue($0) }
+        let ids = jobs.map(\.id)
+        XCTAssertEqual(jobs.map(\.queuePosition), [1, 2, 3, 4])
+        XCTAssertEqual(Set(jobs.map(\.created)).count, 1, "die Uhrzeit unterscheidet sie nicht")
+
+        // Die Liste zeigt den zuerst angestellten unten; drankommen sie von dort nach oben.
+        XCTAssertEqual(store.all().map(\.id), ids.reversed())
+        XCTAssertEqual(JobStore.runOrder(of: ids.reversed(), in: store.all()), ids)
+        XCTAssertEqual(JobStore.runOrder(of: [ids[2], ids[0], ids[3], ids[1]], in: store.all()), ids,
+                       "es zählt der Platz, nicht die Reihenfolge, in der die Wartenden genannt werden")
+        // Läuft der erste schon, ist der zweite der nächste.
+        XCTAssertEqual(JobStore.runOrder(of: [ids[3], ids[1], ids[2]], in: store.all()).first, ids[1])
+        XCTAssertEqual(JobStore.runOrder(of: [ids[1], "gibt-es-nicht"], in: store.all()), [ids[1]])
+    }
+
+    func testQueuePositionsSurviveReloadingAndRunning() async throws {
+        let (store, template) = try setup()
+        let ids = try batch(["m", "a", "z"], like: template).map { try store.enqueue($0).id }
+
+        // Ein neu geöffneter Bestand – wie nach einem Neustart des Programms – nennt dieselben Plätze.
+        let reopened = JobStore(directory: store.directory)
+        XCTAssertEqual(reopened.all().map(\.id), ids.reversed())
+        XCTAssertEqual(try ids.map { try reopened.load($0).queuePosition }, [1, 2, 3])
+        XCTAssertEqual(try reopened.enqueue(batch(["b"], like: template)[0]).queuePosition, 4)
+
+        // Wer wartete, als das Programm endete, behält beim Fortsetzen seinen Platz.
+        XCTAssertEqual(try reopened.enqueue(try reopened.load(ids[1])).queuePosition, 2)
+
+        // Der Lauf ändert am Platz nichts, obwohl er „geändert“ bei jedem Schritt neu setzt …
+        do { _ = try await JobRunner(store: reopened).run(try reopened.load(ids[0]), currentToolchain: "abc1234") { step, _ in
+            if step == .build { throw Boom(description: "Build fehlgeschlagen") }
+        }; XCTFail("hätte abbrechen müssen") } catch {}
+        let stopped = try reopened.load(ids[0])
+        XCTAssertEqual(stopped.state, .failed)
+        XCTAssertEqual(stopped.queuePosition, 1)
+        // … aber wer schon einmal lief und fortgesetzt wird, stellt sich hinten an.
+        XCTAssertEqual(try reopened.enqueue(stopped).queuePosition, 5)
+        XCTAssertEqual(reopened.all().first?.id, ids[0])
+        XCTAssertEqual(JobStore.runOrder(of: ids, in: reopened.all()), [ids[1], ids[2], ids[0]])
+    }
+
+    func testReorderingSwapsPlacesOnlyAmongTheNamedJobs() throws {
+        let (store, template) = try setup()
+        let ids = try batch(["m", "a", "z", "c", "k"], like: template).map { try store.enqueue($0).id }
+        // Der erste läuft schon, der vierte wurde abgebrochen: beide stehen nicht zur Wahl.
+        _ = try JobRunner(store: store).cancel(ids[3])
+        let waiting = [ids[1], ids[2], ids[4]]
+
+        try store.reorder([ids[4], ids[1], ids[2]])
+        XCTAssertEqual(JobStore.runOrder(of: waiting, in: store.all()), [ids[4], ids[1], ids[2]])
+        XCTAssertEqual(try ids.map { try store.load($0).queuePosition }, [1, 3, 5, 4, 2],
+                       "die drei tauschen die Plätze 2, 3 und 5; die anderen behalten ihren")
+        XCTAssertEqual(store.all().map(\.id), [ids[2], ids[3], ids[1], ids[4], ids[0]])
+
+        // Die neue Reihenfolge steht in den Dateien, nicht nur im Speicher.
+        let reopened = JobStore(directory: store.directory)
+        XCTAssertEqual(JobStore.runOrder(of: waiting, in: reopened.all()), [ids[4], ids[1], ids[2]])
+
+        // Was es nicht gibt oder keinen Platz hat, wird übergangen und bringt nichts durcheinander.
+        let old = batch(["o"], like: template, at: 1_700_000_000)[0]
+        try store.save(old)
+        try store.reorder([ids[2], "gibt-es-nicht", old.id, ids[4]])
+        XCTAssertNil(try store.load(old.id).queuePosition)
+        XCTAssertEqual(JobStore.runOrder(of: waiting, in: store.all()), [ids[2], ids[1], ids[4]])
+    }
+
+    /// Auftragsdateien von früher kennen keinen Platz. Sie müssen sich laden lassen und fest geordnet sein.
+    func testJobsStoredWithoutAPositionLoadInAStableOrder() throws {
+        let (store, template) = try setup()
+        let older = batch(["q"], like: template, at: 1_700_000_000)[0]
+        let twins = batch(["b", "y", "f"], like: template, at: 1_700_000_500)
+        for job in twins + [older] { try store.save(job) }
+        let file = try String(contentsOf: store.directory.appendingPathComponent("\(older.id).json"), encoding: .utf8)
+        XCTAssertFalse(file.contains("queuePosition"), "so sieht eine Datei von früher aus: ohne die Angabe")
+
+        // Neueste zuerst; bei gleicher Sekunde entscheidet die Kennung – jedes Mal gleich.
+        let expected = [twins[1].id, twins[2].id, twins[0].id, older.id]
+        for _ in 0..<5 { XCTAssertEqual(store.all().map(\.id), expected) }
+        XCTAssertEqual(store.all().map(\.queuePosition), [nil, nil, nil, nil])
+
+        // Ein neuer Auftrag steht über allen von früher, obwohl sie nach der Uhr später angelegt sein könnten.
+        let new = try store.enqueue(batch(["n"], like: template, at: 1_600_000_000)[0])
+        XCTAssertEqual(new.queuePosition, 1)
+        XCTAssertEqual(store.all().map(\.id), [new.id] + expected)
+        // Wird einer von früher fortgesetzt, stellt er sich hinten an.
+        XCTAssertEqual(try store.enqueue(try store.load(older.id)).queuePosition, 2)
+        XCTAssertEqual(JobStore.runOrder(of: [older.id, new.id], in: store.all()), [new.id, older.id])
+    }
 }
 
 final class CoverTests: XCTestCase {

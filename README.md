@@ -31,7 +31,8 @@ downloaded that Meta does not confirm you have purchased.
    For the Meta account, the app opens Meta's download page for its sign-in tool; once the file is in your
    Downloads folder the app picks it up by itself – you do not have to move it or make it executable.
 3. Pick a game under **Games** and click **Install**. The **Jobs** page shows the steps. A job can be
-   interrupted at any point and resumed later; nothing that was downloaded or copied is lost.
+   interrupted at any point and resumed later; nothing that was downloaded or copied is lost. Several jobs
+   run one after another, from the bottom of the list upwards; drag a waiting job to change when its turn is.
 
 Not everything set up yet? A game's files can be downloaded as soon as its account is signed in – **Download
 Files Now** on the game's page needs neither Xcode nor a developer team nor the headset. Building and installing

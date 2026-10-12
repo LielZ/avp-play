@@ -13,13 +13,26 @@ struct JobsView: View {
                 .navigationTitle(L("Jobs", "Aufträge"))
         } else {
             HSplitView {
-                List(model.jobs, selection: $model.selectedJob) { job in
-                    JobRow(job: job).tag(job.id)
-                        .contextMenu {
-                            let phase = model.phase(of: job)
-                            Button(L("Take Off This List", "Aus dieser Liste nehmen")) { model.remove([job]) }
-                                .disabled(phase == .running || phase == .queued)
-                        }
+                List(selection: $model.selectedJob) {
+                    ForEach(model.jobs) { job in
+                        let phase = model.phase(of: job)
+                        JobRow(job: job).tag(job.id)
+                            .contextMenu {
+                                // Dasselbe wie Ziehen, für den, der lieber klickt.
+                                if phase == .queued {
+                                    Button(L("Move Up (Runs Later)", "Nach oben (kommt später dran)")) { model.move(job, sooner: false) }
+                                        .disabled(model.queued.last == job.id)
+                                    Button(L("Move Down (Runs Sooner)", "Nach unten (kommt früher dran)")) { model.move(job, sooner: true) }
+                                        .disabled(model.queued.first == job.id)
+                                    Divider()
+                                }
+                                Button(L("Take Off This List", "Aus dieser Liste nehmen")) { model.remove([job]) }
+                                    .disabled(phase == .running || phase == .queued)
+                            }
+                            // Ziehen lässt sich nur, was wartet: Was läuft, fertig ist oder angehalten wurde, bleibt stehen.
+                            .moveDisabled(phase != .queued)
+                    }
+                    .onMove { model.moveJobs(from: $0, to: $1) }
                 }
                 .frame(minWidth: 250, idealWidth: 290, maxWidth: 360)
                 Group {
@@ -50,6 +63,29 @@ extension AppModel {
         case .running: return .interrupted
         case .waiting: return .interrupted
         }
+    }
+
+    /// Zieht wartende Aufträge in der Liste an eine andere Stelle. Sie tauschen dabei nur untereinander die Plätze;
+    /// alle anderen Zeilen bleiben, wo sie sind. Die neue Reihenfolge steht sofort in den Auftragsdateien.
+    func moveJobs(from source: IndexSet, to destination: Int) {
+        var list = jobs
+        list.move(fromOffsets: source, toOffset: destination)
+        setRunOrder(JobStore.runOrder(of: queued, in: list))
+    }
+
+    /// Rückt einen wartenden Auftrag um einen Platz. Früher dran heißt in der Liste: nach unten.
+    func move(_ job: Job, sooner: Bool) {
+        guard let from = queued.firstIndex(of: job.id) else { return }
+        let to = sooner ? from - 1 : from + 1
+        guard queued.indices.contains(to) else { return }
+        var order = queued
+        order.swapAt(from, to)
+        setRunOrder(order)
+    }
+
+    private func setRunOrder(_ ids: [String]) {
+        do { try paths.jobs.reorder(ids) } catch { notice = "\(error)" }
+        reloadJobs()
     }
 }
 
