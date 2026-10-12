@@ -39,6 +39,10 @@ Files Now** on the game's page needs neither Xcode nor a developer team nor the 
 follow once Setup is complete, without downloading again.
 
 Every installed game opens with the same start window: its picture, its name, **Start** and **Settings**.
+Settings holds the picture's dials – foveated rendering, resolution, and edge smoothing where a game can take
+it: for a Vulkan game that smooths its edges by itself with fewer than four samples the choice appears after the
+game has run once. Under *Advanced*, *Display output* says how finely the finished picture is put on the display;
+it starts at *Light*, which leaves the graphics chip more time for the game.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -85,7 +89,7 @@ recipes in [`recipes/`](recipes) are:
 | Walkabout Mini Golf | Meta Store | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network |
-| Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes |
+| Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes; edge smoothing at 4x by default (a setting in the game's start window) |
 | Alien: Rogue Incursion | Meta Store | about 14 GB; lowers its own resolution a little under load; loading screens flicker |
 | Assassin's Creed Nexus VR | Meta Store | about 29 GB; edges shimmer somewhat, passthrough is not supported |
 | Eye of the Temple | Meta Store | the whip is drawn thanks to a fix a user sent in |
