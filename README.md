@@ -42,7 +42,10 @@ Every installed game opens with the same start window: its picture, its name, **
 Settings holds the picture's dials – foveated rendering, resolution, and edge smoothing where a game can take
 it: for a Vulkan game that smooths its edges by itself with fewer than four samples the choice appears after the
 game has run once. Under *Advanced*, *Display output* says how finely the finished picture is put on the display;
-it starts at *Light*, which leaves the graphics chip more time for the game.
+it starts at *Light*, which leaves the graphics chip more time for the game. *Frame rate* offers *Up to 100*, the
+default, and *Up to 120*, which is smoother where the game manages it and the Vision Pro's display can do it; when
+a game cannot keep up, the Vision Pro halves the rate for a while (100 to 50, 120 to 60). Mixed-reality games have
+no such choice: their room shows only in the space that runs at up to 100.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
