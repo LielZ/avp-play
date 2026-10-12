@@ -99,6 +99,13 @@ final class RecipeTests: XCTestCase {
         XCTAssertNil(old.store.pinned)
         XCTAssertEqual(old.status.playability, "verified")
         XCTAssertEqual(old.addons?.items?.count, 248)
+        // Walkabout war vor 6.8 mit 6.7 geprüft; auch die bleibt als geprüfte Fassung wählbar.
+        let golf = try XCTUnwrap(all.first { $0.id == "walkabout" })
+        let golfOld = try XCTUnwrap(variants.first { $0.id == "walkabout" })
+        XCTAssertEqual(golfOld.versionCode, 60366)
+        XCTAssertEqual(golfOld.versionName, "6.7")
+        XCTAssertEqual(golfOld.toolchain.target, golf.toolchain.target)
+        XCTAssertEqual(golfOld.status.playability, "verified")
         XCTAssertTrue(variants.allSatisfy { v in all.contains { $0.id == v.id && $0.versionCode != v.versionCode } },
                       "jede weitere Fassung gehört zu einem Spiel des Ordners und ist eine andere als dessen")
     }
