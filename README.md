@@ -87,7 +87,7 @@ recipes in [`recipes/`](recipes) are:
 | Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes |
 | Alien: Rogue Incursion | Meta Store | about 14 GB; lowers its own resolution a little under load; loading screens flicker |
 | Assassin's Creed Nexus VR | Meta Store | about 29 GB; edges shimmer somewhat, passthrough is not supported |
-| Eye of the Temple | Meta Store | |
+| Eye of the Temple | Meta Store | the whip is drawn thanks to a fix a user sent in |
 | Resident Evil 4 | Meta Store | about 8.5 GB; runs with a fix a user sent in |
 | Skydance's BEHEMOTH | Meta Store | about 28 GB; runs with fixes users sent in; the first start builds shaders behind the loading screen for several minutes |
 | Maestro | Meta Store | song packs you bought are unlocked (checked with one pack); others are skipped |
