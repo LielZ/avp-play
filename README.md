@@ -104,7 +104,7 @@ Quest title from the Meta Store – some 17,000, loaded page by page as you scro
 | **Verified** | tested by the project, with a recipe in this repository |
 | **Community Verified** | more users report that it runs than that it does not, or it runs with a fix a user sent in that the project has taken over but not tested itself |
 | **Untested** | nobody has reported yet, or the reports are tied |
-| **Incompatible** | more users report that it does not run |
+| **Incompatible** | more users report that it does not run, or the project has looked at it and knows why it cannot – the game's page then says why |
 
 If you own a game, you can try it: the app looks up its files with your account and builds it – with the
 toolchain's own entry for that game where there is one, otherwise with a generic one that only goes by the
