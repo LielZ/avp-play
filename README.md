@@ -90,7 +90,7 @@ recipes in [`recipes/`](recipes) are:
 | Eye of the Temple | Meta Store | |
 | Resident Evil 4 | Meta Store | about 8.5 GB; runs with a fix a user sent in |
 | Skydance's BEHEMOTH | Meta Store | about 28 GB; runs with fixes users sent in; the first start builds shaders behind the loading screen for several minutes |
-| Maestro | Meta Store | song packs you have not bought are skipped |
+| Maestro | Meta Store | song packs you bought are unlocked (checked with one pack); others are skipped |
 | Star Wars: Tales from the Galaxy's Edge | Meta Store | about 7 GB; runs with a fix a user sent in and the project's own |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |

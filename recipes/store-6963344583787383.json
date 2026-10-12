@@ -1,4 +1,8 @@
 {
+ "addons": {
+  "dest": "android-files",
+  "kind": "purchase-list"
+ },
  "files": [
   {
    "dest": "",
@@ -97,8 +101,12 @@
     "de": "Vom Projekt am 2026-10-11 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 3 von 11 Prüfsummen aus einem Download erfasst."
    },
    {
-    "en": "Needs toolchain 291 or newer. Files of add-on content you have not bought are not delivered by Meta; the app skips them and the game runs without them.",
-    "de": "Braucht Toolchain 291 oder neuer. Dateien von Zusatzinhalten, die du nicht gekauft hast, liefert Meta nicht aus; die App überspringt sie, und das Spiel läuft ohne sie."
+    "en": "Needs toolchain 319 or newer. Files of add-on content you have not bought are not delivered by Meta; the app skips them and the game runs without them.",
+    "de": "Braucht Toolchain 319 oder neuer. Dateien von Zusatzinhalten, die du nicht gekauft hast, liefert Meta nicht aus; die App überspringt sie, und das Spiel läuft ohne sie."
+   },
+   {
+    "en": "Add-on packs you bought are unlocked from the purchase list the store confirms. So far checked with one pack (La Crème de la Crème).",
+    "de": "Gekaufte Zusatzpakete werden über die vom Store bestätigte Kaufliste freigeschaltet. Bisher mit einem Paket geprüft (La Crème de la Crème)."
    }
   ]
  },
@@ -107,7 +115,7 @@
  },
  "title": "Maestro",
  "toolchain": {
-  "minCommit": "33df7b3",
+  "minCommit": "f9b0804",
   "target": "x6963344583787383"
  },
  "versionCode": 397,

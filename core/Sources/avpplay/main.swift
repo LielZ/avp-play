@@ -93,6 +93,7 @@ avpplay – command line for the AVP Play core library
   avpplay steam setup|login <name>|logout      Valve's SteamCMD: fetch it, sign in to Steam (you type the password into Valve's tool), sign out
   avpplay steam fetch <id> --steam-account <name> [--with <file name>]   get the files a recipe needs from your own Steam purchase
   avpplay purchases <id>                       confirmed in-game purchases and the add-on content that goes with them
+           --skus              also name each purchase as the store names it
   avpplay plan <id>   [selection]              show what would be downloaded (no request to the download site)
   avpplay fetch <id>  [selection]              download missing files and check them
   avpplay verify <id>                          check the files you have against the recipe's checksums
@@ -142,6 +143,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay steam setup|login <Name>|logout      Valves SteamCMD: holen, bei Steam anmelden (das Passwort tippst du in Valves Werkzeug), abmelden
   avpplay steam fetch <id> --steam-account <Name> [--with <Dateiname>]   die Dateien eines Rezepts aus dem eigenen Steam-Kauf holen
   avpplay purchases <id>                       bestätigte Käufe im Spiel und zugehörige Zusatzinhalte
+           --skus              jeden Kauf auch so nennen, wie der Store ihn nennt
   avpplay plan <id>   [Auswahl]                zeigen, was geladen würde (keine Abfrage an die Download-Seite)
   avpplay fetch <id>  [Auswahl]                fehlende Dateien laden und prüfen
   avpplay verify <id>                          vorhandene Dateien gegen die Prüfsummen des Rezepts prüfen
@@ -429,6 +431,7 @@ case "purchases":
     do {
         let skus = try await client.purchases(appId: app)
         print(L("\(r.title): confirmed purchases: \(skus.count).", "\(r.title): \(skus.count) bestätigte Käufe."))
+        if o.flags.contains("skus") { for sku in skus { print("  \(sku)") } }
         if let items = r.addons?.items {
             let owned = items.filter { skus.contains($0.sku) }
             print(L("Of these, add-on files matched in the recipe: \(owned.count).",
