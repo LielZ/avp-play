@@ -28,6 +28,8 @@ struct Game: Identifiable {
     var id: String { recipe.id }
     /// Sind die Dateien des Spiels bekannt? Bei einem Platzhalter noch nicht.
     var prepared: Bool { !draft || !recipe.files.isEmpty }
+    /// Mixed-Reality-Modus, der hier funktioniert: sagt das Rezept oder der Katalog.
+    var mixedReality: Bool { recipe.mixedReality == true || catalog?.mixedReality == true }
     /// Wie weit dem Spiel zu trauen ist. Was der Katalog sagt, gilt – dort legt das Projekt fest oder zählen die
     /// Meldungen. Ohne Katalog (kein Netz, abgeschaltet, Sonderapp) gilt das mitgelieferte Rezept.
     var trust: Trust {
@@ -253,6 +255,8 @@ final class AppModel: ObservableObject {
     /// Nur gemerkte Spiele, deren Dateien noch nicht vollständig auf dem Mac liegen: was von den Favoriten noch zu
     /// laden ist. Das Gegenstück zu „Geladen, nicht installiert“ eine Stufe früher.
     @AppStorage("filterFavouritesMissing") var filterFavouritesMissing = false
+    /// Nur Spiele mit einem Mixed-Reality-Modus, der mit AVP Play funktioniert.
+    @AppStorage("filterMixedReality") var filterMixedReality = false
     /// Ob ein Filter gesetzt ist, der die Favoriten braucht – dann sollen alle dastehen, auch die, bis zu denen der
     /// Katalog noch nicht geladen ist.
     var favouritesWanted: Bool { filterFavourites || filterFavouritesMissing }
@@ -434,6 +438,7 @@ final class AppModel: ObservableObject {
                 && (!filterDownloaded || (game.downloaded && !game.installed))
                 && (!filterFavourites || isFavourite(game))
                 && (!filterFavouritesMissing || (isFavourite(game) && !game.downloaded))
+                && (!filterMixedReality || game.mixedReality)
                 && (words.isEmpty || game.recipe.title.lowercased().contains(words) || game.recipe.package.lowercased().contains(words))
         }.sorted { a, b in
             // Geprüftes zuerst, dann schon Nachgeschlagenes, dann was Nutzer bestätigen, das Ungetestete, zuletzt

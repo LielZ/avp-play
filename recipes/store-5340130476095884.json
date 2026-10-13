@@ -55,5 +55,6 @@
   "target": "x5340130476095884"
  },
  "versionCode": 13214,
- "versionName": "1.0"
+ "versionName": "1.0",
+ "mixedReality": true
 }

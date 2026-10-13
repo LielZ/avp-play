@@ -18,6 +18,8 @@ public struct CatalogGame: Codable, Sendable, Identifiable, Equatable {
     public var noteDe: String?
     /// Unter welchem Namen die Toolchain das Spiel kennt; fehlt, wenn sie es nicht kennt.
     public var target: String?
+    /// Das Spiel hat einen Mixed-Reality-Modus, der mit AVP Play funktioniert.
+    public var mixedReality: Bool?
     /// Meldungen von Nutzern; jede zählt, sobald sie eingeht.
     public var works: Int
     public var problems: Int

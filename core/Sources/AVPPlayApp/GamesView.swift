@@ -21,6 +21,9 @@ struct GamesView: View {
         Toggle(L("Favourites Not Downloaded", "Nicht geladene Favoriten"), isOn: $model.filterFavouritesMissing)
             .help(L("Favourites whose files are not completely on this Mac yet – what is still to download.",
                     "Favoriten, deren Dateien noch nicht vollständig auf diesem Mac liegen – was noch zu laden ist."))
+        Toggle(L("Mixed Reality", "Mixed Reality"), isOn: $model.filterMixedReality)
+            .help(L("Games with a mixed-reality mode that works with AVP Play: your own room shows around the game.",
+                    "Spiele mit einem Mixed-Reality-Modus, der mit AVP Play funktioniert: Der eigene Raum ist um das Spiel herum zu sehen."))
     }
 
     /// Was neben den Filtern steht: die Liste ausgeben, alles aktualisieren, und was gerade im Hintergrund läuft.

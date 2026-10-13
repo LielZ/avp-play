@@ -50,7 +50,7 @@ a game cannot keep up, the Vision Pro halves the rate for a while (100 to 50, 12
 no such choice: their room shows only in the space that runs at up to 100. Where a game shows a player name it
 takes from the headset's account and cannot change itself, Settings has a *Player name* field for it. *Advanced*
 › *Test* holds switches for behaviour that is built in but not the default (for instance the sound block size from
-before toolchain 461); each one applies from the next start.
+before toolchain 478); each one applies from the next start.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -81,6 +81,10 @@ that it knows which games people have that do not run yet. It is only a list: no
 account or device. *Favourites Not Downloaded* is also the quick way to see what of your favourites is still to
 fetch to this Mac.
 
+**Mixed reality.** The overview's *Mixed Reality* filter shows the games whose mixed-reality mode works with AVP
+Play – your own room around the game. At the moment these are TRIANGLE STRATEGY, Demeo and Richie's Plank
+Experience.
+
 **Updates.** Once a day the app asks GitHub whether a newer release exists and offers to install it. It replaces
 itself only with a version that is signed by the same developer and notarised by Apple. You can turn the check
 off in the settings.
@@ -93,13 +97,13 @@ recipes in [`recipes/`](recipes) are:
 | Game | Source | Notes |
 |---|---|---|
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick; the first start compiles shaders for several minutes, on the game's own screen |
-| Batman: Arkham Shadow | Meta Store | optional voice languages; from toolchain 461 drawn at 4608 pixels an eye and full resolution with foveated rendering at *Strong* (before: 3072 at 70 %) – both are settings in the game's start window, and a copy installed earlier takes the new defaults once |
+| Batman: Arkham Shadow | Meta Store | optional voice languages; from toolchain 478 drawn at 4608 pixels an eye and full resolution with foveated rendering at *Strong* (before: 3072 at 70 %) – both are settings in the game's start window, and a copy installed earlier takes the new defaults once |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
 | Moss | Meta Store | |
 | Walkabout Mini Golf | Meta Store or Steam | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes. If you bought it on Steam instead, choose **Purchased from: Steam** on its page: the app then fetches the Android build Steam ships (for Steam Frame) from your Steam account and unlocks the add-ons Steam confirms for it. No older versions for the Steam copy |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network; asks for the local network when it opens – allow it, or the PC waits for a connection (before toolchain 380 a new install was never asked); from 380 its requests to Steam's servers get through and its start window closes once the stream is up, thanks to fixes a user sent in |
-| Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes; edge smoothing at 4x and, from toolchain 461, foveated rendering at *Medium* by default (settings in the game's start window) |
+| Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes; edge smoothing at 4x and, from toolchain 478, foveated rendering at *Medium* by default (settings in the game's start window) |
 | Alien: Rogue Incursion | Meta Store | about 14 GB; lowers its own resolution a little under load; loading screens flicker |
 | Assassin's Creed Nexus VR | Meta Store | about 29 GB; edges shimmer somewhat, passthrough is not supported |
 | Eye of the Temple | Meta Store | the whip is drawn thanks to a fix a user sent in |
@@ -112,9 +116,10 @@ recipes in [`recipes/`](recipes) are:
 | Demeo | Meta Store | about 4.3 GB; its mixed-reality mode works – your room shows around the board; it cannot sign in to its maker's account service (that needs Meta's own sign-in proof) and plays with a local player, whose name you set in the start window; playing online with others has not been tried |
 | Vampire: The Masquerade – Justice | Meta Store | about 7 GB |
 | Red Matter 2 | Meta Store | about 9 GB; changes its picture's resolution with the load |
+| Tetris Effect: Connected | Meta Store | about 2.2 GB; drawn at the display's own resolution (a setting in the game's start window) |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |
-| Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German; from toolchain 461 the eyes of characters no longer flash in solid colours, and on the Vision Pro with the M5 the presets *Balanced* (the default) and *Sharp* in the game's start window draw the largest picture with detailed textures at an even half of the display rate (50 pictures a second), *Balanced* with strong foveated rendering and without bloom and ambient occlusion – found by play on one headset; how warm it gets over a long session is not measured yet. Frame cadence, effects and texture memory are settings under *Custom*, a frame-rate readout can be switched on, and a copy installed earlier keeps a custom set as it was. On the first Vision Pro (M2) the two presets are the same with the picture one size smaller; nobody has run them there yet |
+| Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German; from toolchain 478 the eyes of characters no longer flash in solid colours, and on the Vision Pro with the M5 the presets *Balanced* (the default) and *Sharp* in the game's start window draw the largest picture with detailed textures at an even half of the display rate (50 pictures a second), *Balanced* with strong foveated rendering and without bloom and ambient occlusion – found by play on one headset; how warm it gets over a long session is not measured yet. Frame cadence, effects and texture memory are settings under *Custom*, a frame-rate readout can be switched on, and a copy installed earlier keeps a custom set as it was. On the first Vision Pro (M2) the two presets are the same with the picture one size smaller; nobody has run them there yet |
 
 These twenty-one are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
 Quest title from the Meta Store – some 17,000, loaded page by page as you scroll. What you see on each is a label:
@@ -250,10 +255,11 @@ as pull requests.
 ## Thanks to rebelancap
 
 [rebelancap](https://github.com/rebelancap) keeps a Klepton fork of their own and offered its fixes to this one
-([issue 16](https://github.com/myMartek/avp-play/issues/16)). From toolchain 461 a large part of them is in: fixed
+([issue 16](https://github.com/myMartek/avp-play/issues/16)). From toolchain 478 a large part of them is in: fixed
 foveated rendering for Vulkan games, a loader and a translator that cope with very large Unreal libraries, a wider
 Android and Unreal surface for games not seen here yet, fixes to the OpenGL path, controller haptics that no longer
-run on the thread that draws, and sound handed over in blocks of 256 frames. What changes how a game already listed
+run on the thread that draws, sound handed over in blocks of 256 frames, sound that stops at once when the Digital
+Crown is pressed, and answers to some 160 calls of Meta's headset interface that stopped a game here before. What changes how a game already listed
 here behaves is a switch under *Test* until it has been seen on a headset. The rest of the fork's work is to follow.
 Thank you.
 

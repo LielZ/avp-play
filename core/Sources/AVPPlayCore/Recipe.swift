@@ -21,6 +21,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var trees: [RecipeTree]?
     /// Versteht das Spiel eine Liste eigener Server (Adressen, Admin-Zugang)? Dann steht hier, wohin sie gehört.
     public var servers: ServerListSupport?
+    /// Hat das Spiel einen Mixed-Reality-Modus, der hier funktioniert (der eigene Raum ist zu sehen)? Die
+    /// Übersicht kann danach filtern. Fehlt die Angabe, gilt sie als nein.
+    public var mixedReality: Bool?
 
     public struct IconSource: Codable, Sendable, Equatable {
         /// Steam-App-ID: Hintergrund und Logo aus dem lokalen Bildspeicher des Steam-Clients des Nutzers.

@@ -26,6 +26,7 @@ Recipes never contain game content, credentials or account data – only identif
   "addons": { … },                    // optional
   "trees": [ … ],                     // optional, for games that are folders rather than an APK
   "icon": { "steamAppId": "9050" },   // optional: take the icon from the local Steam library
+  "mixedReality": true,               // optional: the game's mixed-reality mode works (the overview's filter)
   "status": { "playability": "reported", "download": "proven", "notes": [ … ] }
 }
 ```

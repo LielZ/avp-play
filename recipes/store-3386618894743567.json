@@ -1,0 +1,50 @@
+{
+ "files": [
+  {
+   "dest": "",
+   "id": "30483093431336080",
+   "localName": "x3386618894743567.apk",
+   "name": "TetrisEffect-Android-Shipping-arm64.apk",
+   "required": true,
+   "role": "apk",
+   "size": 67713177,
+   "sha256": "94ede5f65539966fc56aea0871976eae1520658997abc46977fa74b68e068e16"
+  },
+  {
+   "dest": "@obb",
+   "id": "30483090024669754",
+   "name": "main.158.com.enhanceexperience.tetriseffect.obb",
+   "required": true,
+   "role": "main-obb",
+   "size": 2112732804,
+   "sha256": "1009a180f780171f8ca265184a1ce96fdae1dddebe2119d3a258f9e9d726272c"
+  }
+ ],
+ "id": "store-3386618894743567",
+ "package": "com.enhanceexperience.tetriseffect",
+ "schema": 1,
+ "status": {
+  "playability": "verified",
+  "download": "proven",
+  "notes": [
+   {
+    "en": "Marked as verified by the project on 2026-10-13. File list as Meta's tool reports it for this build; 2 of 2 checksums recorded from a download.",
+    "de": "Vom Projekt am 2026-10-13 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 2 von 2 Prüfsummen aus einem Download erfasst."
+   },
+   {
+    "en": "Tetris Effect: Connected. Played by the author with PlayStation VR2 Sense controllers, with sound; about 2.2 GB. Drawn at the display's own resolution (a setting in the game's start window).",
+    "de": "Tetris Effect: Connected. Vom Autor mit PlayStation-VR2-Sense-Controllern gespielt, mit Ton; etwa 2,2 GB. Wird in der Auflösung der Anzeige gezeichnet (eine Einstellung im Startfenster des Spiels)."
+   }
+  ]
+ },
+ "store": {
+  "appId": "3386618894743567"
+ },
+ "title": "Tetris® Effect: Connected",
+ "toolchain": {
+  "minCommit": "8db8e59",
+  "target": "x3386618894743567"
+ },
+ "versionCode": 158,
+ "versionName": "2.0.2"
+}
