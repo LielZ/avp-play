@@ -41,7 +41,7 @@ follow once Setup is complete, without downloading again.
 Every installed game opens with the same start window: its picture, its name, **Start** and **Settings**.
 Settings holds the picture's dials – foveated rendering, resolution, and edge smoothing where a game can take
 it: for a Vulkan game that smooths its edges by itself with fewer than four samples the choice appears after the
-game has run once. A Vulkan game also gets *Foveated rendering* as a choice of four (Off, Light, Medium, Strong)
+game has run once. A Vulkan game also gets *Foveated rendering* as a choice of five (Off, Light, Medium, Strong, Very strong; from toolchain 485 *Strong* has a smaller sharp middle and a finer edge)
 once it has run: the edge of the picture is drawn more coarsely, the middle stays as it is. Under *Advanced*,
 *Display output* says how finely the finished picture is put on the display;
 it starts at *Light*, which leaves the graphics chip more time for the game. *Frame rate* offers *Up to 100*, the
@@ -99,7 +99,7 @@ recipes in [`recipes/`](recipes) are:
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick; the first start compiles shaders for several minutes, on the game's own screen |
 | Batman: Arkham Shadow | Meta Store | optional voice languages; from toolchain 478 drawn at 4608 pixels an eye and full resolution with foveated rendering at *Strong* (before: 3072 at 70 %) – both are settings in the game's start window, and a copy installed earlier takes the new defaults once |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
-| Moss | Meta Store | |
+| Moss | Meta Store | from toolchain 485 drawn at the display's own resolution (4608 pixels an eye) with foveated rendering at *Strong*, 16x anisotropic filtering and a frame on every second refresh of the display (an even 60 of 120); before, it ran at about 45 frames a second. A copy installed earlier takes the new picture once |
 | Walkabout Mini Golf | Meta Store or Steam | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes. If you bought it on Steam instead, choose **Purchased from: Steam** on its page: the app then fetches the Android build Steam ships (for Steam Frame) from your Steam account and unlocks the add-ons Steam confirms for it. No older versions for the Steam copy |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network; asks for the local network when it opens – allow it, or the PC waits for a connection (before toolchain 380 a new install was never asked); from 380 its requests to Steam's servers get through and its start window closes once the stream is up, thanks to fixes a user sent in |
