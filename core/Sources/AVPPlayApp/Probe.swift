@@ -63,26 +63,17 @@ enum Probe {
 
         s.apps = apps
         s.toolchainRevision = toolchain?.appRevision()
+        OtherSources.use(recipes: paths.recipes)
         if let recipes = paths.recipes {
             do {
                 // Weitere Fassungen, zu denen das Projekt ein eigenes Rezept führt (recipes/versions).
                 let variants = RecipeStore(directory: recipes).loadVariants()
+                // Rezepte für dasselbe Spiel aus einer anderen Kaufquelle (recipes/sources).
+                let sources = RecipeStore(directory: recipes).loadSources()
+                let revision = toolchain?.appRevision()
                 func game(_ r: Recipe, draft: Bool, tested: Recipe? = nil) -> Game {
-                    // Geprüft ist die Fassung ohne Wahl und jede weitere mit eigenem Rezept; alles andere ist eine
-                    // ungetestete aus dem Store, und dann nennt das Spiel die, die ohne Wahl gilt.
-                    let own = tested.map { t in variants.filter { $0.id == t.id && $0.versionCode != t.versionCode } } ?? []
-                    let verified = tested.map { $0.versionCode == r.versionCode } ?? true || own.contains { $0.versionCode == r.versionCode }
-                    var g = Game(recipe: r,
-                         status: GameStatus.of(recipe: r, store: paths.store, apps: apps, toolchainVersion: toolchain?.appRevision(),
-                                                bundlePrefix: bundlePrefix),
-                         cover: StartHero.choose(recipe: r, store: paths.store).flatMap { NSImage(data: $0.image) },
-                         storeBytes: directorySize(paths.store.directory(for: r)), draft: draft,
-                         testedVersion: verified ? nil : tested?.versionName)
-                    if let tested {
-                        g.verifiedVersions = [GameVersion(versionCode: tested.versionCode, versionName: tested.versionName, kind: .verified, isDefault: true)]
-                            + own.map { GameVersion(versionCode: $0.versionCode, versionName: $0.versionName, kind: .verified, isDefault: false) }
-                    }
-                    return g
+                    Probe.game(r, draft: draft, tested: tested, variants: variants, sources: sources, paths: paths, apps: apps,
+                               toolchainRevision: revision, bundlePrefix: bundlePrefix)
                 }
                 let bundled = try RecipeStore(directory: recipes).loadAll()
                 // Entwürfe für ungetestete Spiele, die schon nachgeschlagen wurden. Ein mitgeliefertes Rezept für
@@ -91,7 +82,7 @@ enum Probe {
                 let drafts = ((try? RecipeStore(directory: DataLocation.base.appendingPathComponent("drafts", isDirectory: true)).loadAll()) ?? [])
                     .filter { r in r.id.hasPrefix("store-") && !(r.store.appId.map(shipped.contains) ?? true) }
                 // Wo der Nutzer die neueste Fassung aus dem Store gewählt hat, gilt deren Rezept statt des geprüften.
-                let active = StoreUpdate.resolve(bundled, variants: variants,
+                let active = StoreUpdate.resolve(bundled, variants: variants, sources: sources,
                                                  drafts: DataLocation.base.appendingPathComponent("drafts", isDirectory: true))
                 s.games = (zip(active, bundled).map { game($0, draft: false, tested: $1) } + drafts.map { game($0, draft: true) })
                     .sorted { $0.recipe.title.localizedCaseInsensitiveCompare($1.recipe.title) == .orderedAscending }
@@ -134,6 +125,40 @@ enum Probe {
     }
 
     /// Was im Verzeichnis des Ordners für Downloads steht: jeder Ordner dort mit dem Spiel, zu dem er gehört.
+    /// Ein Spiel der Übersicht aus seinem geltenden Rezept: Stand im Bestand und auf dem Gerät, Titelbild, und was
+    /// zur Wahl steht (weitere geprüfte Fassungen, eine andere Kaufquelle). Für sich aufrufbar, damit ein Wechsel
+    /// der Kaufquelle nur dieses eine Spiel neu bestimmen muss und nicht alles.
+    static func game(_ r: Recipe, draft: Bool, tested: Recipe?, variants: [Recipe], sources: [Recipe], paths: Paths,
+                     apps: [InstalledApp]?, toolchainRevision: Int?, bundlePrefix: String) -> Game {
+        // Geprüft ist die Fassung ohne Wahl und jede weitere mit eigenem Rezept; alles andere ist eine
+        // ungetestete aus dem Store, und dann nennt das Spiel die, die ohne Wahl gilt.
+        let own = tested.map { t in variants.filter { $0.id == t.id && $0.versionCode != t.versionCode } } ?? []
+        // Dasselbe Spiel aus einer anderen Kaufquelle: ein eigenes Rezept des Projekts, keine „Fassung aus dem
+        // Store“ – und was unter den Versionscodes der anderen Quelle auf dem Gerät liegt, ist nicht dieses.
+        let otherSources = tested.map { t in sources.filter { $0.id == t.id } } ?? []
+        let switched = tested.map { $0.source != r.source } ?? false
+        let family = (tested.map { [$0] } ?? []) + (tested.map { t in variants.filter { $0.id == t.id } } ?? []) + otherSources
+        let foreign = family.filter { $0.source != r.source }.map(\.versionCode)
+        let verified = switched || tested.map { $0.versionCode == r.versionCode } ?? true || own.contains { $0.versionCode == r.versionCode }
+        var g = Game(recipe: r,
+             status: GameStatus.of(recipe: r, store: paths.store, apps: apps, toolchainVersion: toolchainRevision,
+                                    bundlePrefix: bundlePrefix, otherSourceBuilds: Set(foreign)),
+             // Das Titelbild gehört zum Spiel, nicht zur Kaufquelle: Fehlt es bei dieser, gilt das der anderen.
+             cover: (StartHero.choose(recipe: r, store: paths.store) ?? tested.flatMap { StartHero.choose(recipe: $0, store: paths.store) })
+                 .flatMap { NSImage(data: $0.image) },
+             storeBytes: directorySize(paths.store.directory(for: r)), draft: draft,
+             testedVersion: verified ? nil : tested?.versionName)
+        if let tested, !otherSources.isEmpty, let shipped = tested.source {
+            g.sources = [shipped] + otherSources.compactMap(\.source)
+        }
+        g.otherSourceBuilds = foreign
+        if let tested, !switched {
+            g.verifiedVersions = [GameVersion(versionCode: tested.versionCode, versionName: tested.versionName, kind: .verified, isDefault: true)]
+                + own.map { GameVersion(versionCode: $0.versionCode, versionName: $0.versionName, kind: .verified, isDefault: false) }
+        }
+        return g
+    }
+
     static func indexEntries(games: [Game], root: URL) -> [StoreIndex.Entry] {
         let fm = FileManager.default
         let folders = ((try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])

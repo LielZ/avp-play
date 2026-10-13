@@ -15,6 +15,10 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
     case notANativeApp(String)
     /// Das APK bringt nur Programmcode für einen anderen Prozessor mit (ein reines 32-Bit-Spiel).
     case wrongArchitecture(String, [String])
+    /// Für ein Spiel aus Steam fehlt der Name des Steam-Kontos, mit dem Valves Werkzeug angemeldet ist.
+    case steamAccountMissing
+    /// Auf dem Gerät liegt dasselbe Spiel aus einer anderen Kaufquelle (Meta statt Steam oder umgekehrt).
+    case otherSourceInstalled(String, wanted: Recipe.Source)
 
     public var description: String {
         switch self {
@@ -49,6 +53,13 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
             let list = installed.joined(separator: ", ")
             return L("\(title) was not installed: a free Apple account may have only \(AppleMessages.freeAppsPerDevice) apps on the Vision Pro at a time, and these are already there: \(list). Remove one on the headset (press and hold its icon, then “Remove App”), then choose “Resume”. A paid developer membership has no such limit. Before you remove a game, let AVP Play fetch its saved games (the game's page, “Saved Games”): they stay on this Mac and are put back when you install the game again.",
                      "\(title) wurde nicht installiert: Ein kostenloses Apple-Konto darf nur \(AppleMessages.freeAppsPerDevice) Apps gleichzeitig auf der Vision Pro haben, und diese sind schon dort: \(list). Entferne eine auf dem Headset (Icon gedrückt halten, dann „App entfernen“) und wähle dann „Fortsetzen“. Eine bezahlte Entwickler-Mitgliedschaft hat diese Grenze nicht. Bevor du ein Spiel entfernst, lass AVP Play seine Spielstände holen (Seite des Spiels, „Spielstände“): Sie bleiben auf diesem Mac und werden zurückgespielt, wenn du das Spiel wieder installierst.")
+        case .steamAccountMissing:
+            return L("This game comes from Steam, and no Steam account is signed in. Sign in to Steam under “Setup” (on the command line: --steam-account <name>).",
+                     "Dieses Spiel kommt aus Steam, und es ist kein Steam-Konto angemeldet. Melde dich unter „Einrichtung“ bei Steam an (auf der Kommandozeile: --steam-account <Name>).")
+        case .otherSourceInstalled(let title, let wanted):
+            let (new, old) = wanted == .steam ? ("Steam", "Meta") : ("Meta", "Steam")
+            return L("\(title) is on the Vision Pro in its \(old) version. The \(new) version is a different build of the game with its own files and its own saved games, and it cannot be installed over the other one. Remove the game from the Vision Pro first (press and hold its icon, “Remove App”), then install again. Removing the app also deletes the saved games of the \(old) version on the headset.",
+                     "\(title) liegt in der \(old)-Fassung auf der Vision Pro. Die \(new)-Fassung ist ein anderer Stand des Spiels mit eigenen Dateien und eigenen Spielständen und lässt sich nicht über die andere installieren. Entferne das Spiel zuerst von der Vision Pro (Symbol gedrückt halten, „App entfernen“) und installiere dann neu. Beim Entfernen löscht das Headset auch die Spielstände der \(old)-Fassung.")
         case .appRunning(let title):
             return L("\(title) is currently running on the Vision Pro. Installing would quit the game. Quit the game, then resume.",
                      "\(title) läuft gerade auf der Vision Pro. Eine Installation würde das Spiel beenden. Spiel beenden und dann fortsetzen.")
@@ -83,6 +94,11 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     /// Nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn auf dem Gerät noch keine liegen (ein frisch
     /// installiertes Spiel). Ohne Angabe: nein.
     public var restoreSaves: Bool?
+    /// Der Name des Steam-Kontos, mit dem Valves Werkzeug angemeldet ist – für ein Spiel aus Steam.
+    public var steamAccount: String?
+    /// Die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle installiert wäre. Liegt eine davon
+    /// auf dem Gerät, wird nicht darüber installiert.
+    public var otherSourceBuilds: [Int]?
 
     public init(toolchain: String) { self.toolchain = toolchain }
 }
@@ -159,7 +175,10 @@ public struct Installer: Sendable {
         self.progress = progress
     }
 
-    var isStoreTitle: Bool { recipe.store.appId != nil || recipe.files.contains { $0.source == nil } || recipe.addons != nil }
+    /// Ein Titel aus dem Meta-Store. Ein Spiel aus Steam ist keiner: Bei ihm bestätigt Steam Besitz und Zusatzinhalte.
+    var isStoreTitle: Bool {
+        recipe.source != .steam && (recipe.store.appId != nil || recipe.files.contains { $0.source == nil } || recipe.addons != nil)
+    }
     var wantsAddons: Bool { recipe.addons != nil && request.addons }
 
     public func perform(_ step: InstallStep) async throws {
@@ -274,6 +293,10 @@ public struct Installer: Sendable {
     /// Konto: Token prüfen, Besitz prüfen, Käufe holen. Ohne gültigen Token wird nichts Neues freigeschaltet;
     /// ein früher bestätigter Stand der Käufe bleibt gültig.
     func checkAccount() async throws {
+        if let app = recipe.store.steamAppId, recipe.source == .steam {
+            try checkSteamAccount(app: app)
+            return
+        }
         guard isStoreTitle else {
             report(L("Special app: not a Meta Store title, so there is no ownership check with Meta.",
                      "Sonderapp: kein Titel aus dem Meta-Store, keine Besitzprüfung bei Meta."))
@@ -307,9 +330,52 @@ public struct Installer: Sendable {
         }
     }
 
+    /// Ein Spiel aus Steam: Steam wird gefragt, ob das Konto das Spiel besitzt und welche seiner Zusatzinhalte.
+    /// Gefragt wird Valves eigenes Werkzeug mit der Anmeldung des Nutzers; ohne ein klares Ja geht es nicht weiter.
+    /// Die bestätigten Zusatzinhalte bilden die Kaufliste – wie bei Meta ersetzt eine neue Antwort die alte.
+    func checkSteamAccount(app: String) throws {
+        guard let account = request.steamAccount, SteamTool.isAccountName(account) else { throw InstallError.steamAccountMissing }
+        let addons = wantsAddons ? (recipe.addons?.steamApps ?? []) : []
+        report(L("Asking Steam whether this account owns the game …", "Steam wird gefragt, ob das Spiel zu diesem Konto gehört …"))
+        let answers = try SteamLicences(account: account).owned(apps: [app] + addons)
+        switch answers[app] {
+        case true?: report(L("Ownership confirmed by Steam.", "Besitz von Steam bestätigt."))
+        case false?: throw InstallError.notOwned(recipe.title)
+        case nil: throw SteamError.unclearOwnership
+        }
+        guard wantsAddons else { return }
+        let record = PurchaseRecord(appId: app, skus: addons.filter { answers[$0] == true }.sorted(), verified: Date())
+        try? record.save(store: store, recipe: recipe)
+        report(L("Purchases: \(record.skus.count) of \(addons.count) add-ons confirmed by Steam.",
+                 "Käufe: \(record.skus.count) von \(addons.count) Zusatzinhalten von Steam bestätigt."))
+    }
+
+    /// Was aus dem eigenen Steam-Kauf kommt und im Bestand fehlt, holt Valves Werkzeug – bei einem Spiel aus Steam
+    /// als Teil des Auftrags, damit „Installieren“ dort dasselbe tut wie bei einem Spiel aus dem Meta-Store.
+    func fetchFromSteam() throws {
+        guard recipe.source == .steam, let account = request.steamAccount, SteamTool.isAccountName(account),
+              !SteamFetcher.needed(recipe: recipe, store: store, optionalNames: Set(request.optionalNames)).files.isEmpty else { return }
+        let report = self.report, progress = self.progress
+        try SteamFetcher(store: store, account: account).fetch(
+            recipe: recipe, optionalNames: Set(request.optionalNames),
+            progress: { progress(InstallProgress(step: .fetch, done: $0.done, total: $0.total)) },
+            report: { report($0) })
+    }
+
+    /// Liegt dasselbe Spiel aus einer anderen Kaufquelle auf dem Gerät, wird nicht darüber installiert und nichts
+    /// dazukopiert: Die beiden Fassungen haben eigene Dateien, und was die eine dort ließe, fände die andere vor.
+    func refuseOtherSource(device: Device, bundle: String) throws {
+        guard let foreign = request.otherSourceBuilds, !foreign.isEmpty, let wanted = recipe.source,
+              let app = try? control.apps(device: device).first(where: { $0.bundleIdentifier == bundle }),
+              let parts = app.bundleVersion?.split(separator: "."), parts.count == 2, let installed = Int(parts[0]),
+              installed != recipe.versionCode, foreign.contains(installed) else { return }
+        throw InstallError.otherSourceInstalled(recipe.title, wanted: wanted)
+    }
+
     /// Lädt, was im Bestand fehlt. Vor dem ersten Abruf bei Meta wird der Besitz geprüft; es wird nie eine
     /// Datei angefragt, nur um zu sehen, ob Meta sie herausgibt.
     func fetch() async throws {
+        try fetchFromSteam()
         let plan = FetchPlan.plan(recipe: recipe, selection: selection()) { store.state(of: $0, in: recipe) }
         let onlyDownload = request.downloadOnly ?? false
         let fromUser = plan.filter { $0.action == .needsUser }
@@ -387,6 +453,8 @@ public struct Installer: Sendable {
         let commit = toolchain.commit()
         report(L("Device: \(device.name) (visionOS \(device.osVersion)); app: \(bundle); toolchain: \(commit)",
                  "Gerät: \(device.name) (visionOS \(device.osVersion)); App: \(bundle); Toolchain: \(commit)"))
+        // Vor allem anderen: Über die Fassung aus der anderen Kaufquelle wird nicht gebaut und nicht installiert.
+        try refuseOtherSource(device: device, bundle: bundle)
         // Dasselbe für ein APK, das schon im Bestand lag: ohne 64-Bit-Code gibt es nichts zu bauen.
         if let apk = recipe.files.first(where: { $0.role == "apk" }) {
             let found = ApkUnpacker.architectures(of: store.url(for: apk, in: recipe))
@@ -446,7 +514,7 @@ public struct Installer: Sendable {
         }
         // Titelbild aus dem Store als Icon: einmal holen, danach liegt es im Bestand.
         let cover = Toolchain.storeCoverURL(store: store, recipe: recipe)
-        if request.storeArt, !FileManager.default.fileExists(atPath: cover.path), let app = recipe.store.appId {
+        if request.storeArt, !FileManager.default.fileExists(atPath: cover.path), let app = recipe.catalogAppId {
             if let image = await StoreArt().squareCover(appId: app) {
                 try image.write(to: cover, options: .atomic)
                 report(L("Icon: fetched the cover image from the store page.", "Icon: Titelbild von der Store-Seite geholt."))
@@ -457,7 +525,7 @@ public struct Installer: Sendable {
         }
         // Dasselbe im Querformat, für das Startfenster der App.
         let wide = StartHero.storeURL(store: store, recipe: recipe)
-        if request.storeArt, !FileManager.default.fileExists(atPath: wide.path), let app = recipe.store.appId,
+        if request.storeArt, !FileManager.default.fileExists(atPath: wide.path), let app = recipe.catalogAppId,
            let image = await StoreArt().landscapeCover(appId: app) {
             try image.write(to: wide, options: .atomic)
             report(L("Start image: fetched the landscape cover image from the store page.",
@@ -469,6 +537,7 @@ public struct Installer: Sendable {
     /// Ergänzend kopieren: nur was auf dem Gerät fehlt oder eine andere Größe hat.
     func stage() throws {
         let (device, bundle, toolchain) = try target()
+        try refuseOtherSource(device: device, bundle: bundle)
         // Worüber kopiert wird, entscheidet macOS: am Kabel über das Kabel, sonst über das WLAN. Gesagt wird es hier,
         // weil es über Minuten oder Stunden entscheidet.
         if let via = device.transport {

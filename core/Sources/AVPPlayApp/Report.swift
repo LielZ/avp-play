@@ -31,6 +31,7 @@ extension AppModel {
             case .olderToolchain: state = "older toolchain"
             case .olderGame: state = "older game version"
             case .unstamped: state = "older build"
+            case .otherSource: state = "other purchase source"
             case .notInstalled: state = "not installed"
             case .unknown: state = "unknown"
             }

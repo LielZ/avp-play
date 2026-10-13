@@ -45,7 +45,7 @@ extension AppModel {
     /// damit ihr Kennzeichen stimmt, auch wenn ihre Seite des Katalogs nie geladen wird. Jede Kennung nur einmal.
     func loadOwnCatalogEntries() {
         guard onlineCatalog, catalogNextPage > 0 else { return }
-        let mine = Set(games.compactMap { $0.recipe.store.appId } + favourites.compactMap(DraftRecipe.appId(of:)))
+        let mine = Set(games.compactMap { $0.recipe.catalogAppId } + favourites.compactMap(DraftRecipe.appId(of:)))
         let missing = mine.subtracting(catalog.map(\.appId)).subtracting(askedOwn).sorted()
         guard !missing.isEmpty else { return }
         askedOwn.formUnion(missing)
@@ -61,7 +61,7 @@ extension AppModel {
     @discardableResult
     func loadAllFavourites() async -> Int {
         func missing() -> [String] {
-            let loaded = Set(catalog.map(\.appId)).union(games.compactMap { $0.recipe.store.appId })
+            let loaded = Set(catalog.map(\.appId)).union(games.compactMap { $0.recipe.catalogAppId })
             return favourites.compactMap(DraftRecipe.appId(of:)).filter { !loaded.contains($0) }.sorted()
         }
         let wanted = missing()
@@ -154,10 +154,10 @@ extension AppModel {
         let info = Dictionary(catalog.map { ($0.appId, $0) }, uniquingKeysWith: { a, _ in a })
         var out = games.map { game -> Game in
             var g = game
-            if let app = game.recipe.store.appId { g.catalog = info[app] }
+            if let app = game.recipe.catalogAppId { g.catalog = info[app] }
             return g
         }
-        let known = Set(games.compactMap { $0.recipe.store.appId })
+        let known = Set(games.compactMap { $0.recipe.catalogAppId })
         let prefix = customBundlePrefix.isEmpty ? nil : customBundlePrefix
         for entry in catalog where !known.contains(entry.appId) {
             let recipe = DraftRecipe.placeholder(game: entry)
@@ -275,12 +275,17 @@ extension AppModel {
 
     // MARK: Rückmeldung
 
-    func feedbackKey(_ game: Game) -> String { "\(game.recipe.store.appId ?? game.id)-\(game.recipe.versionCode)" }
+    func feedbackKey(_ game: Game) -> String { "\(game.recipe.catalogAppId ?? game.id)-\(game.recipe.versionCode)" }
     func feedbackSent(_ game: Game) -> String? { sentFeedback[feedbackKey(game)] }
 
     /// Schickt eine Rückmeldung: Spiel, Build, Ergebnis, Kommentar und die Versionen von App und Toolchain.
+    ///
+    /// Der Katalog führt ein Spiel unter seiner Meta-Store-Seite, auch wenn es hier aus Steam installiert ist; die
+    /// Meldung zählt dann für dasselbe Spiel. Dass sie die Steam-Fassung meint, sagen ihr Build und ein Vermerk am
+    /// Anfang des Kommentars – der Dienst kennt kein eigenes Feld für die Kaufquelle.
     func sendFeedback(_ game: Game, result: CatalogFeedback.Result, comment: String) {
-        guard onlineCatalog, let appId = game.recipe.store.appId else { return }
+        guard onlineCatalog, let appId = game.recipe.catalogAppId else { return }
+        let comment = game.recipe.source == .steam ? CatalogFeedback.steamMark + comment : comment
         let feedback = CatalogFeedback(appId: appId, versionCode: game.recipe.versionCode, result: result, comment: comment,
                                        appVersion: appVersion, toolchain: toolchain.map { String($0.version()) } ?? "", lang: language.rawValue)
         let key = feedbackKey(game)
@@ -320,7 +325,7 @@ extension AppModel {
     /// Sagt dem Dienst, dass ein Spiel installiert wurde – für jedes Spiel ein einziges Mal, nur sein Name.
     func reportInstall(_ recipe: Recipe) {
         let key = "countedInstalls"
-        guard counting, let game = UsagePing.gameKey(appId: recipe.store.appId, recipe: recipe.id),
+        guard counting, let game = UsagePing.gameKey(appId: recipe.catalogAppId, recipe: recipe.id),
               !(UserDefaults.standard.stringArray(forKey: key) ?? []).contains(game) else { return }
         let client = catalogClient
         Task {

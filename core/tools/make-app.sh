@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(cd .. && pwd)"
-VERSION="${AVPPLAY_APP_VERSION:-1.1.10}"
+VERSION="${AVPPLAY_APP_VERSION:-1.1.11}"
 BUILD="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 OUT="$ROOT/dist/AVP Play.app"
 
@@ -29,6 +29,11 @@ cp "$ROOT"/recipes/*.json "$NEW/Contents/Resources/recipes/"
 if ls "$ROOT"/recipes/versions/*.json >/dev/null 2>&1; then
   mkdir -p "$NEW/Contents/Resources/recipes/versions"
   cp "$ROOT"/recipes/versions/*.json "$NEW/Contents/Resources/recipes/versions/"
+fi
+# Rezepte für dasselbe Spiel aus einer anderen Kaufquelle (RecipeStore.loadSources), soweit es welche gibt.
+if ls "$ROOT"/recipes/sources/*.json >/dev/null 2>&1; then
+  mkdir -p "$NEW/Contents/Resources/recipes/sources"
+  cp "$ROOT"/recipes/sources/*.json "$NEW/Contents/Resources/recipes/sources/"
 fi
 # Die Toolchain kommt mit: das neueste Paket aus dist/ samt Beschreibung (oder AVPPLAY_TOOLCHAIN_ARCHIVE).
 # Die App installiert es beim ersten Start – geprüft gegen die Beschreibung wie jedes andere Paket.

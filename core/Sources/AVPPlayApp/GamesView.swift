@@ -128,7 +128,7 @@ struct FeedbackBox: View {
     var body: some View {
         GroupBox(L("How does it run?", "Wie läuft es?")) {
             VStack(alignment: .leading, spacing: 8) {
-                if !(game.needsMetaAccount && model.onlineCatalog) {
+                if !(game.fromStore && game.recipe.catalogAppId != nil && model.onlineCatalog) {
                     // Sonderapps kennt der Katalog nicht, und ohne Katalog gibt es keinen Empfänger.
                     EmptyView()
                 } else if let sent = model.feedbackSent(game) {
@@ -191,6 +191,7 @@ struct StatusBadge: View {
         case .current: return (L("On the Vision Pro", "Auf der Vision Pro"), .green, "checkmark.circle.fill")
         case .olderToolchain, .olderGame: return (L("Update available", "Aktualisierung möglich"), .orange, "arrow.up.circle.fill")
         case .unstamped: return (L("Installed, older build", "Installiert, älterer Stand"), .orange, "arrow.up.circle.fill")
+        case .otherSource: return (L("Other purchase source installed", "Aus anderer Kaufquelle installiert"), .orange, "arrow.left.arrow.right.circle.fill")
         case .notInstalled: return (L("Not installed", "Nicht installiert"), .secondary, "circle.dashed")
         case .unknown: return (L("Device not reachable", "Gerät nicht erreichbar"), .secondary, "wifi.slash")
         }
@@ -252,12 +253,15 @@ struct OwnershipLabel: View {
     let owned: Owned
     let checking: Bool
     var compact = true
+    /// Bei welchem Store das Spiel gekauft ist; ohne Angabe Meta.
+    var source: Recipe.Source? = .meta
 
     var body: some View {
+        let store = AppModel.name(source)
         let (text, symbol): (String, String) = {
             switch owned {
-            case .yes: return (L("In your Meta account", "In deinem Meta-Konto"), "checkmark.seal")
-            case .no: return (L("Not in your Meta account", "Nicht in deinem Meta-Konto"), "xmark.seal")
+            case .yes: return (L("In your \(store) account", "In deinem \(store)-Konto"), "checkmark.seal")
+            case .no: return (L("Not in your \(store) account", "Nicht in deinem \(store)-Konto"), "xmark.seal")
             case .unknown: return (checking ? L("Checking ownership …", "Besitz wird geprüft …") : L("Ownership not checked", "Besitz nicht geprüft"), "seal")
             case .notApplicable: return (L("Uses your own game files", "Mit deinen eigenen Spieldateien"), "folder")
             }
@@ -266,24 +270,28 @@ struct OwnershipLabel: View {
     }
 }
 
-/// Besitz in einer Zeile, mit dem Knopf, der Meta jetzt noch einmal fragt – auf der Seite jedes Spiels aus dem
-/// Meta-Store. Wer ein Spiel gerade gekauft hat, muss nicht warten, bis die App von selbst wieder fragt.
+/// Besitz in einer Zeile, mit dem Knopf, der den Store jetzt noch einmal fragt – auf der Seite jedes Spiels aus
+/// einem Store. Wer ein Spiel gerade gekauft hat, muss nicht warten, bis die App von selbst wieder fragt.
 struct PurchaseCheck: View {
     @EnvironmentObject var model: AppModel
     let game: Game
     var trailing = false
 
     var body: some View {
-        if let app = game.recipe.store.appId {
+        if let app = OwnershipCache.key(for: game.recipe) {
             let checking = model.checkingPurchase.contains(game.id)
             VStack(alignment: trailing ? .trailing : .leading, spacing: 4) {
                 HStack(spacing: 10) {
-                    OwnershipLabel(owned: model.owned(game), checking: checking || model.checkingOwnership, compact: false)
+                    OwnershipLabel(owned: model.owned(game), checking: checking || model.checkingOwnership, compact: false,
+                                   source: game.recipe.source)
                     Button(checking ? L("Checking …", "Wird geprüft …") : L("Check Purchase", "Kauf prüfen")) { model.checkPurchase(game) }
                         .controlSize(.small)
                         .disabled(checking)
-                        .help(L("Asks Meta now whether the account you are signed in with owns this game.",
-                                "Fragt Meta jetzt, ob das Konto, mit dem du angemeldet bist, dieses Spiel besitzt."))
+                        .help(game.sources.count > 1
+                              ? L("Asks Meta now, and then Steam, whether the account you are signed in with owns this game.",
+                                  "Fragt jetzt Meta und danach Steam, ob das Konto, mit dem du angemeldet bist, dieses Spiel besitzt.")
+                              : L("Asks \(AppModel.name(game.recipe.source)) now whether the account you are signed in with owns this game.",
+                                  "Fragt \(AppModel.name(game.recipe.source)) jetzt, ob das Konto, mit dem du angemeldet bist, dieses Spiel besitzt."))
                 }
                 if let note = model.purchaseNote[game.id] {
                     Text(note).font(.callout).foregroundStyle(.secondary)
@@ -325,7 +333,7 @@ struct CoverImage: View {
             // scrollt eine aus dem Bild, endet ihre Aufgabe, und ein noch nicht begonnener Abruf entfällt.
             .task(id: game.id) {
                 fetched = nil
-                guard game.cover == nil, model.storePictures, let appId = game.recipe.store.appId,
+                guard game.cover == nil, model.storePictures, let appId = game.recipe.catalogAppId,
                       let data = await model.covers.image(appId: appId), !Task.isCancelled else { return }
                 fetched = NSImage(data: data)
             }
@@ -349,7 +357,7 @@ struct GameCard: View {
                     SelectionMark(game: game)
                 }
                 StatusBadge(status: game.status, busy: model.isBusy(game.id))
-                OwnershipLabel(owned: model.owned(game), checking: model.checkingOwnership)
+                OwnershipLabel(owned: model.owned(game), checking: model.checkingOwnership, source: game.recipe.source)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -368,6 +376,49 @@ struct GameCard: View {
 /// Er erscheint nur bei Spielen mit einem geprüften Rezept, und nur, wenn der Store etwas Neueres führt oder
 /// gerade etwas Neueres gewählt ist. Gewechselt wird hier nur das Rezept; geladen und installiert wird mit dem
 /// üblichen Knopf darunter.
+/// Die Wahl der Kaufquelle – nur bei einem Spiel, zu dem das Projekt Rezepte für mehr als einen Store führt.
+/// Eine Fassung lässt sich bei Steam nicht wählen: Steam nennt keine früheren, es gilt die des Rezepts.
+struct SourceBox: View {
+    @EnvironmentObject var model: AppModel
+    let game: Game
+
+    var body: some View {
+        if game.sources.count > 1, let current = game.recipe.source {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker(L("Purchased from", "Gekauft bei"), selection: Binding(
+                        get: { current },
+                        set: { model.chooseSource(game, $0) })) {
+                        ForEach(game.sources, id: \.self) { source in
+                            Text(source == .steam ? L("Steam", "Steam") : L("Meta Store", "Meta-Store")).tag(source)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 320, alignment: .leading)
+                    .disabled(model.isBusy(game.id) || model.steamBusy.contains(game.id))
+                    .help(L("Where you bought this game. Ownership and add-on content are confirmed by that store, and the files are downloaded from it. Changing it changes nothing on the Vision Pro until you install.",
+                            "Wo du dieses Spiel gekauft hast. Dieser Store bestätigt Besitz und Zusatzinhalte, und von ihm werden die Dateien geladen. Ein Wechsel ändert nichts auf der Vision Pro, bis du installierst."))
+                    if current == .steam {
+                        Text(L("The Steam version is the Android build Steam ships for its own headset: version \(game.recipe.versionName), with its own saved games. Only this version is offered – Steam does not list earlier ones.",
+                               "Die Steam-Fassung ist der Android-Stand, den Steam für sein eigenes Headset ausliefert: Fassung \(game.recipe.versionName), mit eigenen Spielständen. Es gibt nur diese Fassung zur Wahl – Steam nennt keine früheren."))
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if !model.steamSignedIn {
+                            Label(L("Sign in to Steam under “Setup” – then the app can check your purchase and download the game.",
+                                    "Melde dich unter „Einrichtung“ bei Steam an – dann kann die App deinen Kauf prüfen und das Spiel laden."),
+                                  systemImage: "person.crop.circle.badge.exclamationmark").font(.callout).foregroundStyle(.orange)
+                        }
+                    }
+                    if game.otherSourceInstalled {
+                        Label(model.otherSourceText(game), systemImage: "arrow.left.arrow.right.circle")
+                            .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(6)
+            }
+        }
+    }
+}
+
 struct StoreVersionBox: View {
     @EnvironmentObject var model: AppModel
     let game: Game
@@ -467,6 +518,7 @@ struct GameDetail: View {
                     .frame(maxHeight: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
 
+                SourceBox(game: game)
                 StoreVersionBox(game: game)
 
                 HStack(alignment: .top) {
@@ -506,7 +558,7 @@ struct GameDetail: View {
                         // im Weg steht. Steht dem Laden dasselbe im Weg wie dem Installieren, sagt es der Text oben.
                         let downloadBlocked = model.downloadBlocker(for: game)
                         if model.hasDownloads(game), !model.isBusy(game.id),
-                           blocked == nil ? game.needsMetaAccount : downloadBlocked != blocked {
+                           blocked == nil ? game.fromStore : downloadBlocked != blocked {
                             Button(action: { model.download(game) }) {
                                 Text(L("Download Only", "Nur herunterladen")).frame(minWidth: 150)
                             }
@@ -588,16 +640,21 @@ struct GameDetail: View {
 
                 GroupBox(L("Good to Know", "Gut zu wissen")) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(game.needsMetaAccount
+                        Text(game.needsSteamAccount
+                             ? L("Before anything is downloaded, Steam is asked whether you own this game – by Valve’s own tool, with your sign-in. Without a purchase, nothing is downloaded.", "Vor dem Laden wird bei Steam geprüft, dass du dieses Spiel gekauft hast – mit Valves eigenem Werkzeug und deiner Anmeldung. Ohne Kauf wird nichts geladen.")
+                             : game.needsMetaAccount
                              ? L("Before anything is downloaded, Meta is asked whether you own this game. Without a purchase, nothing is downloaded.", "Vor dem Laden wird bei Meta geprüft, dass du dieses Spiel gekauft hast. Ohne Kauf wird nichts geladen.")
                              : L("This game does not come from the Meta Store. The game files come from your own purchase and are never downloaded.", "Dieses Spiel kommt nicht aus dem Meta-Store. Die Spieldateien stammen aus deinem eigenen Kauf und werden nie geladen."))
-                        if game.needsMetaAccount {
+                        if game.fromStore {
                             PurchaseCheck(game: game)
                         } else {
                             OwnershipLabel(owned: model.owned(game), checking: model.checkingOwnership, compact: false)
                         }
                         if let app = game.recipe.store.appId, let page = URL(string: "https://www.meta.com/experiences/\(app)/") {
                             Link(L("View in the Meta Store", "Im Meta-Store ansehen"), destination: page)
+                        } else if game.recipe.source == .steam, let app = game.recipe.store.steamAppId,
+                                  let page = URL(string: "https://store.steampowered.com/app/\(app)/") {
+                            Link(L("View on Steam", "Bei Steam ansehen"), destination: page)
                         }
                         Text(playability)
                         if let notes = game.recipe.status.notes, !notes.isEmpty {
@@ -622,7 +679,7 @@ struct GameDetail: View {
         // Sagt der Katalog erst danach, unter welchem Namen die Toolchain das Spiel kennt, wird noch einmal geprüft.
         .task(id: "\(game.id) \(game.catalog?.target ?? "")") { model.prepare(game) }
         .task(id: game.id) { model.checkStoreVersions(only: game) }
-        .task(id: game.id) { model.recheckPurchaseIfStale(game) }
+        .task(id: "\(game.id) \(game.recipe.source?.rawValue ?? "")") { model.purchaseOnOpen(game) }
         .confirmationDialog(L("Remove the files of \(game.recipe.title) from this Mac?", "Die Dateien von \(game.recipe.title) von diesem Mac entfernen?"),
                             isPresented: $confirmRemove) {
             Button(L("Remove \(Installer.gigabytes(game.storeBytes))", "\(Installer.gigabytes(game.storeBytes)) entfernen"), role: .destructive) { model.removeFiles(game) }
@@ -676,7 +733,7 @@ struct GameDetail: View {
     /// Was beim Entfernen verloren geht – bei Sonderapps auch Dateien, die sich nicht neu laden lassen.
     private var removeWarning: String {
         let device = L("The game on your Vision Pro is not touched.", "Das Spiel auf deiner Vision Pro bleibt unberührt.")
-        if game.needsMetaAccount {
+        if game.fromStore {
             return L("Everything this app downloaded for the game is deleted. For the next update it has to be downloaded again. ",
                      "Alles, was dieses Programm für das Spiel geladen hat, wird gelöscht. Für die nächste Aktualisierung muss es neu geladen werden. ") + device
         }
@@ -688,7 +745,7 @@ struct GameDetail: View {
         switch game.status.onDevice {
         case .current: return L("Reinstall", "Neu installieren")
         case .olderToolchain, .olderGame, .unstamped: return L("Update", "Aktualisieren")
-        case .notInstalled, .unknown: return L("Install", "Installieren")
+        case .notInstalled, .unknown, .otherSource: return L("Install", "Installieren")
         }
     }
 
@@ -716,6 +773,7 @@ struct GameDetail: View {
         switch game.status.onDevice {
         case .unknown: return L("The Vision Pro is not reachable right now.", "Die Vision Pro ist gerade nicht erreichbar.")
         case .notInstalled: return L("Not installed yet.", "Noch nicht installiert.")
+        case .otherSource(let stamp): return L("On the Vision Pro from the other purchase source (\(stamp)).", "Auf der Vision Pro aus der anderen Kaufquelle (\(stamp)).")
         case .current: return L("Installed and up to date.", "Installiert und auf dem neuesten Stand.")
         case .olderToolchain: return L("Installed. The current toolchain produces a newer build – “Update” builds it; saved games and data are kept.", "Installiert. Mit der jetzigen Toolchain gibt es eine neuere Fassung – „Aktualisieren“ baut sie; Spielstände und Daten bleiben.")
         case .olderGame(let stamp): return L("Installed in an older version of the game (\(stamp)). This app now has version \(game.recipe.versionName) – “Update” downloads what is new and installs it; saved games and data are kept.",
@@ -782,8 +840,8 @@ struct GameDetail: View {
                     })) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(L("Add-on content you have purchased", "Zusatzinhalte, die du gekauft hast"))
-                            Text(L("Only what Meta confirms as purchased is downloaded and unlocked.",
-                                   "Geladen und freigeschaltet wird nur, was Meta als gekauft bestätigt."))
+                            Text(L("Only what \(AppModel.name(game.recipe.source)) confirms as purchased is downloaded and unlocked.",
+                                   "Geladen und freigeschaltet wird nur, was \(AppModel.name(game.recipe.source)) als gekauft bestätigt."))
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }
@@ -793,8 +851,8 @@ struct GameDetail: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(L("Bought something new?", "Etwas Neues gekauft?"))
                                 Text(model.syncBlocker(for: game)
-                                     ?? L("Asks Meta again what you have purchased, downloads what is missing and adds it to the installed game – without building it again.",
-                                          "Fragt Meta neu, was du gekauft hast, lädt das Fehlende und legt es zum installierten Spiel – ohne es neu zu bauen."))
+                                     ?? L("Asks \(AppModel.name(game.recipe.source)) again what you have purchased, downloads what is missing and adds it to the installed game – without building it again.",
+                                          "Fragt \(AppModel.name(game.recipe.source)) neu, was du gekauft hast, lädt das Fehlende und legt es zum installierten Spiel – ohne es neu zu bauen."))
                                     .font(.callout).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }

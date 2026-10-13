@@ -131,9 +131,13 @@ public enum StoreUpdate {
         public var latest: Set<String>
         /// Spiele, für die eine bestimmte Fassung gewählt ist: Kennung des Rezepts → Versionscode. Geht `latest` vor.
         public var versions: [String: Int]
-        public init(latest: Set<String> = [], versions: [String: Int] = [:]) {
+        /// Spiele, für die eine andere Kaufquelle gewählt ist als die des mitgelieferten Rezepts: Kennung → Quelle.
+        /// Ohne Eintrag gilt die des Rezepts (Meta). Die Wahl der Fassung oben gilt nur für diese.
+        public var sources: [String: Recipe.Source]
+        public init(latest: Set<String> = [], versions: [String: Int] = [:], sources: [String: Recipe.Source] = [:]) {
             self.latest = latest
             self.versions = versions
+            self.sources = sources
         }
 
         // Eine Datei aus der Zeit vor `versions` nennt nur `latest`; sie gilt weiter.
@@ -141,6 +145,12 @@ public enum StoreUpdate {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             latest = try c.decodeIfPresent(Set<String>.self, forKey: .latest) ?? []
             versions = try c.decodeIfPresent([String: Int].self, forKey: .versions) ?? [:]
+            sources = try c.decodeIfPresent([String: Recipe.Source].self, forKey: .sources) ?? [:]
+        }
+
+        /// Wählt für ein Spiel die Kaufquelle; die des mitgelieferten Rezepts braucht keinen Eintrag.
+        public mutating func choose(source: Recipe.Source, for recipeId: String, shipped: Recipe.Source = .meta) {
+            sources[recipeId] = source == shipped ? nil : source
         }
 
         /// Wählt für ein Spiel eine Fassung; `nil` heißt: die, die ohne Wahl gilt.
@@ -174,8 +184,17 @@ public enum StoreUpdate {
     /// Entwürfen, oder aus der Zeit davor `latest-<Kennung>.json` für „die neueste“). Ein nachgeschlagenes Rezept
     /// gilt nur, wenn es zum selben Spiel und zum selben Eintrag der Toolchain gehört; ein Spiel, das bei seiner
     /// Fassung bleiben soll, bleibt dabei. Was sich nicht auflösen lässt, fällt auf das Rezept ohne Wahl zurück.
-    public static func resolve(_ shipped: [Recipe], variants: [Recipe] = [], drafts: URL, choices: Choices = .load()) -> [Recipe] {
+    ///
+    /// Ist für ein Spiel eine andere Kaufquelle gewählt (`sources`, Rezepte aus `recipes/sources`), gilt deren
+    /// Rezept – eine Fassung lässt sich dort nicht wählen: Steam nennt keine früheren.
+    public static func resolve(_ shipped: [Recipe], variants: [Recipe] = [], sources: [Recipe] = [], drafts: URL,
+                               choices: Choices = .load()) -> [Recipe] {
         shipped.map { tested in
+            if let wanted = choices.sources[tested.id], wanted != tested.source,
+               let other = sources.first(where: { $0.id == tested.id && $0.source == wanted
+                                                  && $0.toolchain.target == tested.toolchain.target }) {
+                return other
+            }
             guard tested.store.pinned != true else { return tested }
             func same(_ other: Recipe) -> Bool {
                 other.id == tested.id && other.store.appId == tested.store.appId && other.toolchain.target == tested.toolchain.target

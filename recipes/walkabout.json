@@ -10,7 +10,7 @@
  },
  "toolchain": {
   "target": "walkabout",
-  "minCommit": "6d185aa"
+  "minCommit": "f41447e"
  },
  "files": [
   {

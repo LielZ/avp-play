@@ -60,6 +60,9 @@ public struct CatalogFeedback: Codable, Sendable, Equatable {
     public var toolchain: String
     public var lang: String
 
+    /// Steht vor dem Kommentar einer Meldung zur Fassung eines Spiels aus Steam.
+    public static let steamMark = "[Steam] "
+
     public init(appId: String, versionCode: Int, result: Result, comment: String, appVersion: String, toolchain: String, lang: String) {
         self.appId = appId
         self.versionCode = versionCode

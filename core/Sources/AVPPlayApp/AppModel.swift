@@ -20,6 +20,11 @@ struct Game: Identifiable {
     /// Die Fassungen, zu denen das Projekt ein eigenes Rezept führt: zuerst die, die ohne Wahl gilt, dann weitere.
     /// Leer bei einem Spiel ohne mitgeliefertes Rezept.
     var verifiedVersions: [GameVersion] = []
+    /// Die Kaufquellen, zwischen denen bei diesem Spiel gewählt werden kann – die des mitgelieferten Rezepts zuerst.
+    /// Leer, wenn es nur eine gibt.
+    var sources: [Recipe.Source] = []
+    /// Die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle installiert wäre.
+    var otherSourceBuilds: [Int] = []
     var id: String { recipe.id }
     /// Sind die Dateien des Spiels bekannt? Bei einem Platzhalter noch nicht.
     var prepared: Bool { !draft || !recipe.files.isEmpty }
@@ -28,6 +33,9 @@ struct Game: Identifiable {
     var trust: Trust {
         // Geprüft ist eine Fassung, nicht ein Name: die neuere aus dem Store hat das Projekt nicht gesehen.
         if testedVersion != nil { return .untested }
+        // Ebenso eine Kaufquelle: Was der Katalog sagt, gilt der Fassung aus dem Meta-Store. Die aus Steam ist ein
+        // anderer Stand des Spiels und trägt ihr eigenes Urteil im Rezept.
+        if recipe.source == .steam, !sources.isEmpty, recipe.status.playability != "verified" { return .untested }
         switch catalog?.status {
         case "verified": return .verified
         case "community": return .community
@@ -39,13 +47,23 @@ struct Game: Identifiable {
     var incompatible: Bool { trust == .incompatible }
     /// Sonderapps kommen nicht aus dem Meta-Store; für sie wird kein Meta-Konto gebraucht.
     var needsMetaAccount: Bool { recipe.store.appId != nil }
+    /// Aus dem eigenen Steam-Kauf: Besitz und Zusatzinhalte bestätigt Steam, geladen wird mit Valves Werkzeug.
+    var needsSteamAccount: Bool { recipe.source == .steam }
+    /// Kommt das Spiel aus einem Store, bei dem das Programm den Kauf prüft und die Dateien selbst lädt?
+    var fromStore: Bool { recipe.source != nil }
     /// Vom Projekt selbst auf einer Vision Pro geprüft.
     var verified: Bool { trust == .verified }
     var installed: Bool {
         switch status.onDevice {
         case .current, .olderToolchain, .olderGame, .unstamped: return true
-        case .notInstalled, .unknown: return false
+        // Was aus der anderen Kaufquelle auf dem Gerät liegt, ist nicht diese Installation.
+        case .notInstalled, .unknown, .otherSource: return false
         }
+    }
+    /// Liegt dasselbe Spiel aus der anderen Kaufquelle auf dem Gerät?
+    var otherSourceInstalled: Bool {
+        if case .otherSource = status.onDevice { return true }
+        return false
     }
     /// Liegt alles, woraus das Spiel gebaut wird, vollständig auf diesem Mac?
     var downloaded: Bool { prepared && status.filesRequired + status.treesRequired > 0 && status.stockComplete }
@@ -113,7 +131,9 @@ final class AppModel: ObservableObject {
     @Published var section: AppSection = .games
     /// Das geöffnete Spiel in der Übersicht (leer: das Raster).
     @Published var gamePath: [String] = []
-    @Published var games: [Game] = [] { didSet { rebuildAllGames() } }
+    @Published var games: [Game] = [] { didSet { if !replacingOne { rebuildAllGames() } } }
+    /// Gesetzt, während ein einzelnes Spiel ersetzt wird (`replace`): Die Liste aller Spiele ist dann schon nachgeführt.
+    var replacingOne = false
     @Published var loadProblem: String?
     @Published var device: Device?
     @Published var devices: [Device] = []
@@ -283,9 +303,107 @@ final class AppModel: ObservableObject {
     // MARK: Besitz
 
     func owned(_ game: Game) -> Owned {
-        guard let app = game.recipe.store.appId else { return .notApplicable }
-        guard let record = ownership[app] else { return .unknown }
+        guard let key = OwnershipCache.key(for: game.recipe) else { return .notApplicable }
+        guard let record = ownership[key] else { return .unknown }
         return record.owned ? .yes : .no
+    }
+
+    /// Das Rezept eines Spiels für eine Kaufquelle: das geltende, das mitgelieferte oder das aus `recipes/sources`.
+    func recipe(of game: Game, source: Recipe.Source) -> Recipe? {
+        if game.recipe.source == source { return game.recipe }
+        guard !game.draft, let recipes = paths.recipes else { return nil }
+        let store = RecipeStore(directory: recipes)
+        if let shipped = try? store.load(id: game.id), shipped.source == source { return shipped }
+        return store.loadSources().first { $0.id == game.id && $0.source == source }
+    }
+
+    /// Der Name einer Kaufquelle, wie er in Sätzen steht.
+    static func name(_ source: Recipe.Source?) -> String { source == .steam ? "Steam" : "Meta" }
+
+    /// Warum nichts geladen wird, wenn das Konto das Spiel nicht besitzt.
+    func notOwnedText(_ game: Game) -> String {
+        let store = AppModel.name(game.recipe.source)
+        return L("This game is not in your \(store) account, so nothing is downloaded.",
+                 "Dieses Spiel gehört nicht zu deinem \(store)-Konto. Es wird nichts geladen.")
+    }
+
+    /// Was fehlt, damit das Konto gefragt werden kann, bei dem das Spiel gekauft ist.
+    func accountBlocker(for game: Game) -> String? {
+        if game.needsSteamAccount, !steamSignedIn { return L("Sign in to Steam first (see “Setup”).", "Erst bei Steam anmelden (siehe „Einrichtung“).") }
+        if game.needsMetaAccount, account != .signedIn { return L("Sign in to Meta first (see “Setup”).", "Erst bei Meta anmelden (siehe „Einrichtung“).") }
+        return nil
+    }
+
+    /// Wählt, aus welchem Kauf ein Spiel geladen und installiert wird. Auf der Vision Pro ändert das nichts, bis
+    /// installiert wird – und über die Fassung der anderen Quelle wird nicht installiert.
+    func chooseSource(_ game: Game, _ source: Recipe.Source) {
+        guard source != game.recipe.source, game.sources.contains(source) else { return }
+        guard !isBusy(game.id), !steamBusy.contains(game.id) else {
+            purchaseNote[game.id] = L("A job for this game is running. Switch the purchase source when it has finished.",
+                                      "Für dieses Spiel läuft gerade ein Auftrag. Wechsle die Kaufquelle, wenn er fertig ist.")
+            return
+        }
+        var choices = StoreUpdate.Choices.load()
+        choices.choose(source: source, for: game.id, shipped: game.sources.first ?? .meta)
+        try? choices.save()
+        latestChoices = choices
+        // Wer selbst gewählt hat, bei dem wird nicht mehr von selbst gewechselt.
+        UserDefaults.standard.set(true, forKey: AppModel.sourceLookedKey(game.id))
+        purchaseNote[game.id] = nil
+        // Nur dieses Spiel wird neu bestimmt, mit dem, was über das Gerät schon bekannt ist. Alles neu zu laden
+        // (Gerät fragen, jeden Ordner im Bestand zählen) dauert Sekunden und ändert an den anderen Spielen nichts.
+        let id = game.id, catalog = game.catalog
+        let paths = paths, apps = installedApps, revision = toolchainRevision, prefix = bundlePrefix, drafts = draftsDirectory
+        Task.detached(priority: .userInitiated) {
+            var fresh: Game?
+            if let recipes = paths.recipes {
+                let store = RecipeStore(directory: recipes)
+                if let tested = try? store.load(id: id) {
+                    let variants = store.loadVariants(), sources = store.loadSources()
+                    let active = StoreUpdate.resolve([tested], variants: variants, sources: sources, drafts: drafts, choices: choices).first ?? tested
+                    fresh = Probe.game(active, draft: false, tested: tested, variants: variants, sources: sources, paths: paths,
+                                       apps: apps, toolchainRevision: revision, bundlePrefix: prefix)
+                    fresh?.catalog = catalog
+                }
+            }
+            let result = fresh
+            await MainActor.run {
+                guard let result else { self.refresh(); return }
+                self.replace(result)
+                // Für die neue Quelle steht der Besitz vielleicht noch nicht fest: gleich fragen, wenn das Konto da ist.
+                if self.owned(result) == .unknown, self.accountBlocker(for: result) == nil { self.checkPurchase(result, quiet: true) }
+            }
+        }
+    }
+
+    /// Setzt ein einzelnes Spiel in beiden Listen neu ein, ohne die ganze Übersicht neu aufzubauen.
+    func replace(_ game: Game) {
+        if let i = allGames.firstIndex(where: { $0.id == game.id }) { allGames[i] = game }
+        if let i = games.firstIndex(where: { $0.id == game.id }) {
+            replacingOne = true
+            games[i] = game
+            replacingOne = false
+        }
+    }
+
+    static func sourceLookedKey(_ id: String) -> String { "sourceLooked.\(id)" }
+
+    /// Beim Öffnen der Seite eines Spiels. Gibt es das Spiel aus zwei Kaufquellen, wird beim ersten Mal bei beiden
+    /// nachgesehen (siehe `checkPurchase`); danach gilt, was sonst gilt: ein älteres „Nein“ wird noch einmal erfragt.
+    func purchaseOnOpen(_ game: Game) {
+        let key = AppModel.sourceLookedKey(game.id)
+        guard game.sources.contains(.steam), game.recipe.source == .meta, !UserDefaults.standard.bool(forKey: key) else {
+            // Steam ist gewählt und noch nie gefragt worden (der tägliche Durchgang fragt nur Meta): jetzt fragen.
+            if game.recipe.source == .steam, owned(game) == .unknown, steamSignedIn { checkPurchase(game, quiet: true) }
+            else { recheckPurchaseIfStale(game) }
+            return
+        }
+        // Gehört das Spiel dem Meta-Konto, bleibt es dabei; gefragt wird Steam dann nicht.
+        if owned(game) == .yes { UserDefaults.standard.set(true, forKey: key); return }
+        // Kurz nach dem Start steht noch nicht fest, ob ein Meta-Konto angemeldet ist. Dann wird jetzt nicht
+        // entschieden, sondern beim nächsten Öffnen der Seite.
+        if account == .unknown || account == .checking { return }
+        checkPurchase(game, quiet: true, firstOpen: true)
     }
 
     /// Die Spiele, die zu den gesetzten Filtern passen.
@@ -313,75 +431,159 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Fragt Meta für jedes Store-Spiel, ob das Konto es besitzt – eine dokumentierte Abfrage je Spiel, mit
-    /// Abstand dazwischen, höchstens einmal am Tag. Beim ersten unerwarteten Ergebnis ist Schluss; was bis
-    /// dahin beantwortet ist, bleibt stehen.
+    /// Fragt für jedes Store-Spiel, ob das Konto es besitzt – höchstens einmal am Tag je Spiel. Beim ersten
+    /// unerwarteten Ergebnis ist Schluss; was bis dahin beantwortet ist, bleibt stehen.
+    ///
+    /// Meta: eine dokumentierte Abfrage je Spiel, mit Abstand dazwischen. Steam: für die Spiele, bei denen Steam als
+    /// Kaufquelle gewählt ist, ein Lauf von Valves Werkzeug mit der Anmeldung des Nutzers, der alle auf einmal fragt.
     func checkOwnership(force: Bool = false) {
-        // Der Besitzstand liegt beim Bestand. Fehlt dessen Platte, wird Meta nicht für jedes Spiel neu gefragt, nur
+        // Der Besitzstand liegt beim Bestand. Fehlt dessen Platte, wird nicht für jedes Spiel neu gefragt, nur
         // weil der gemerkte Stand gerade nicht lesbar ist – und nichts an den verwaisten Pfad geschrieben.
-        guard account == .signedIn, !checkingOwnership, !games.isEmpty, storeBlocker == nil else { return }
+        guard !checkingOwnership, !games.isEmpty, storeBlocker == nil else { return }
         let cache = OwnershipCache(store: paths.store)
         let known = cache.load()
         ownership = known
-        let due = games.compactMap { $0.recipe.store.appId }.filter { force || OwnershipCache.needsCheck(known[$0]) }
-        guard !due.isEmpty else { return }
+        let due = account == .signedIn
+            ? games.compactMap { $0.recipe.store.appId }.filter { force || OwnershipCache.needsCheck(known[$0]) } : []
+        let steamDue = steamSignedIn
+            ? games.filter { $0.recipe.source == .steam }.compactMap { $0.recipe.store.steamAppId }
+                .filter { force || OwnershipCache.needsCheck(known["steam:\($0)"]) } : []
+        guard !due.isEmpty || !steamDue.isEmpty else { return }
         checkingOwnership = true
+        let steamAccount = steamAccount
         Task.detached {
-            let gate = RequestGate()
-            do {
-                let client = MetaClient(token: try TokenStore().read())
-                let user = try await client.me()
-                for app in due {
-                    try await gate.waitForTurn()
-                    let owned = try await client.ownsApp(appId: app, userId: user)
-                    await gate.requestFinished()
-                    let now = cache.record(appId: app, owned: owned)
-                    await MainActor.run { self.ownership = now }
+            if !due.isEmpty {
+                let gate = RequestGate()
+                do {
+                    let client = MetaClient(token: try TokenStore().read())
+                    let user = try await client.me()
+                    for app in due {
+                        try await gate.waitForTurn()
+                        let owned = try await client.ownsApp(appId: app, userId: user)
+                        await gate.requestFinished()
+                        let now = cache.record(appId: app, owned: owned)
+                        await MainActor.run { self.ownership = now }
+                    }
+                } catch {}
+            }
+            if !steamDue.isEmpty {
+                // Was Steam nicht klar beantwortet, bleibt, wie es war.
+                var signedOut = false
+                do {
+                    let answers = try SteamLicences(account: steamAccount).owned(apps: steamDue)
+                    for app in steamDue {
+                        guard let owned = answers[app] else { continue }
+                        let now = cache.record(appId: "steam:\(app)", owned: owned)
+                        await MainActor.run { self.ownership = now }
+                    }
+                } catch {
+                    if case SteamError.notSignedIn = error { signedOut = true }
                 }
-            } catch {}
+                if signedOut { await MainActor.run { self.steamSignedInAs = "" } }
+            }
             await MainActor.run { self.checkingOwnership = false }
         }
     }
 
-    /// „Kauf prüfen“: fragt Meta jetzt für dieses eine Spiel, ob das Konto es besitzt – dieselbe dokumentierte
-    /// Abfrage wie im täglichen Durchgang, nach `/me`, und trägt die Antwort ein. Für jemanden, der ein Spiel
-    /// gerade gekauft hat und es hier noch als „nicht in deinem Meta-Konto“ sieht.
-    func checkPurchase(_ game: Game, quiet: Bool = false) {
-        guard let app = game.recipe.store.appId, !checkingPurchase.contains(game.id) else { return }
+    /// „Kauf prüfen“: fragt jetzt für dieses eine Spiel, ob das Konto es besitzt, und trägt die Antwort ein. Für
+    /// jemanden, der ein Spiel gerade gekauft hat und es hier noch als „nicht in deinem Konto“ sieht.
+    ///
+    /// Gibt es das Spiel aus zwei Kaufquellen, wird erst Meta gefragt (dieselbe dokumentierte Abfrage wie im
+    /// täglichen Durchgang, nach `/me`) und dann Steam (Valves Werkzeug, mit der Anmeldung des Nutzers). Gehört es
+    /// dem Meta-Konto, bleibt die Quelle Meta und Steam wird nicht gefragt. Gehört es nur dem Steam-Konto, wird
+    /// auf Steam gewechselt. Gehört es keinem, bleibt es bei Meta. Zurück zu Meta wird nie von selbst gewechselt.
+    func checkPurchase(_ game: Game, quiet: Bool = false, firstOpen: Bool = false) {
+        guard let current = game.recipe.source, !checkingPurchase.contains(game.id) else { return }
         if let why = storeBlocker { purchaseNote[game.id] = why; return }
-        guard account == .signedIn else {
-            purchaseNote[game.id] = L("Sign in to Meta under “Setup” first.", "Melde dich zuerst unter „Einrichtung“ bei Meta an.")
+        let metaApp = recipe(of: game, source: .meta)?.store.appId
+        let steamApp = recipe(of: game, source: .steam)?.store.steamAppId
+        let metaReady = account == .signedIn && metaApp != nil
+        let steamReady = steamSignedIn && steamApp != nil
+        // Zu Steam gewechselt wird nur, wenn feststeht, dass Meta das Spiel nicht bestätigt: Meta hat „nein“ gesagt,
+        // oder es ist gar kein Meta-Konto angemeldet. Solange die Anmeldung noch geprüft wird oder Meta gerade
+        // nicht antwortet, bleibt die Quelle, wie sie ist.
+        let metaAbsent = account == .signedOut
+        // Ohne das Konto der geltenden Quelle – und ohne ein anderes, das gefragt werden könnte – gibt es nichts zu fragen.
+        if current == .steam, !steamReady {
+            if !quiet { purchaseNote[game.id] = L("Sign in to Steam under “Setup” first.", "Melde dich zuerst unter „Einrichtung“ bei Steam an.") }
+            return
+        }
+        if current == .meta, !metaReady, !steamReady {
+            if !quiet { purchaseNote[game.id] = L("Sign in to Meta under “Setup” first.", "Melde dich zuerst unter „Einrichtung“ bei Meta an.") }
             return
         }
         checkingPurchase.insert(game.id)
         purchaseNote[game.id] = nil
         let cache = OwnershipCache(store: paths.store)
         let id = game.id
+        let steamAccount = steamAccount
         Task.detached {
             var note: String?
-            var owned: Bool?
-            do {
-                let client = MetaClient(token: try TokenStore().read())
-                let user = try await client.me()
-                let answer = try await client.ownsApp(appId: app, userId: user)
-                owned = answer
-                let now = cache.record(appId: app, owned: answer)
-                await MainActor.run { self.ownership = now }
+            var metaOwned: Bool?
+            var steamOwned: Bool?
+            var steamSignedOut = false
+            if let metaApp, metaReady {
+                do {
+                    let client = MetaClient(token: try TokenStore().read())
+                    let user = try await client.me()
+                    let answer = try await client.ownsApp(appId: metaApp, userId: user)
+                    metaOwned = answer
+                    let now = cache.record(appId: metaApp, owned: answer)
+                    await MainActor.run { self.ownership = now }
+                } catch {
+                    if !quiet, current == .meta { note = L("Meta could not be asked: \(Redaction.redact("\(error)"))", "Meta ließ sich nicht fragen: \(Redaction.redact("\(error)"))") }
+                }
+            }
+            // Steam: wo es die geltende Quelle ist, und sonst nur, wenn Meta das Spiel nicht bestätigt hat.
+            if let steamApp, steamReady, current == .steam || metaOwned != true {
+                do {
+                    if let answer = try SteamLicences(account: steamAccount).owned(apps: [steamApp])[steamApp] {
+                        steamOwned = answer
+                        let now = cache.record(appId: "steam:\(steamApp)", owned: answer)
+                        await MainActor.run { self.ownership = now }
+                    } else if !quiet, current == .steam {
+                        note = "\(SteamError.unclearOwnership)"
+                    }
+                } catch {
+                    if case SteamError.notSignedIn = error { steamSignedOut = true }
+                    if !quiet, current == .steam { note = "\(error)" }
+                }
+            }
+            let toSteam = current == .meta && steamOwned == true && (metaOwned == false || (metaOwned == nil && metaAbsent))
+            if toSteam {
+                note = L("This game is not in your Meta account, but it is in your Steam account. The purchase source is now Steam.",
+                         "Dieses Spiel gehört nicht zu deinem Meta-Konto, aber zu deinem Steam-Konto. Die Kaufquelle ist jetzt Steam.")
+            } else if note == nil, !quiet {
                 // Ungefragt (beim Öffnen der Seite) wird ein weiteres „Nein“ nicht eigens erläutert.
-                if !answer, !quiet {
+                if current == .meta, metaOwned == false {
                     note = L("Meta says this game is not in the account you are signed in with. A new purchase can take a few minutes to show up; a game bought with another Meta account needs that account under “Setup”.",
                              "Meta sagt, dass dieses Spiel nicht zu dem Konto gehört, mit dem du angemeldet bist. Ein neuer Kauf kann ein paar Minuten brauchen, bis er sichtbar ist; ein Spiel, das mit einem anderen Meta-Konto gekauft wurde, braucht dieses Konto unter „Einrichtung“.")
+                    if steamApp != nil {
+                        note! += steamOwned == false
+                            ? L(" Steam does not have it in your account either.", " Auch bei Steam gehört es nicht zu deinem Konto.")
+                            : L(" If you bought it on Steam, sign in to Steam under “Setup” and check again.", " Hast du es bei Steam gekauft, melde dich unter „Einrichtung“ bei Steam an und prüfe noch einmal.")
+                    }
+                } else if current == .steam, steamOwned == false {
+                    note = L("Steam says this game is not in the account you are signed in with. A game bought with another Steam account needs that account under “Setup”.",
+                             "Steam sagt, dass dieses Spiel nicht zu dem Konto gehört, mit dem du angemeldet bist. Ein Spiel, das mit einem anderen Steam-Konto gekauft wurde, braucht dieses Konto unter „Einrichtung“.")
                 }
-            } catch {
-                if !quiet { note = L("Meta could not be asked: \(Redaction.redact("\(error)"))", "Meta ließ sich nicht fragen: \(Redaction.redact("\(error)"))") }
             }
             let final = note
-            let bought = owned == true
+            let bought = metaOwned == true
+            let settled = metaOwned == true || (steamOwned != nil && (metaOwned == false || metaAbsent))
+            let lost = steamSignedOut
             await MainActor.run {
                 self.checkingPurchase.remove(id)
                 self.purchaseNote[id] = final
+                if lost { self.steamSignedInAs = "" }
+                if firstOpen, settled { UserDefaults.standard.set(true, forKey: AppModel.sourceLookedKey(id)) }
+                guard let game = self.allGames.first(where: { $0.id == id }) else { return }
+                if toSteam {
+                    self.chooseSource(game, .steam)
+                    self.purchaseNote[id] = final
+                }
                 // Ein ungetestetes Spiel, das nun doch zum Konto gehört: gleich nachschlagen, woraus es besteht.
-                if bought, let game = self.allGames.first(where: { $0.id == id }), game.draft, !game.prepared { self.prepare(game) }
+                if bought, game.draft, !game.prepared { self.prepare(game) }
             }
         }
     }
@@ -389,8 +591,8 @@ final class AppModel: ObservableObject {
     /// Beim Öffnen der Seite eines Spiels: Ein „Nein“, das älter als zehn Minuten ist, wird noch einmal erfragt.
     /// Nicht bei einem ungetesteten Spiel, das noch nachgeschlagen wird – dort stellt `prepare` dieselbe Frage.
     func recheckPurchaseIfStale(_ game: Game) {
-        guard let app = game.recipe.store.appId, let record = ownership[app], !record.owned,
-              Date().timeIntervalSince(record.checked) > 600, account == .signedIn, !(game.draft && !game.prepared) else { return }
+        guard let key = OwnershipCache.key(for: game.recipe), let record = ownership[key], !record.owned,
+              Date().timeIntervalSince(record.checked) > 600, accountBlocker(for: game) == nil, !(game.draft && !game.prepared) else { return }
         checkPurchase(game, quiet: true)
     }
 
@@ -514,11 +716,9 @@ final class AppModel: ObservableObject {
         if game.draft, !game.prepared {
             return prepareNote[game.id] ?? L("The files of this game have not been looked up yet.", "Die Dateien dieses Spiels sind noch nicht nachgeschlagen.")
         }
-        if game.needsMetaAccount, account != .signedIn { return L("Sign in to Meta first (see “Setup”).", "Erst bei Meta anmelden (siehe „Einrichtung“).") }
-        if owned(game) == .no {
-            return L("This game is not in your Meta account, so nothing is downloaded.",
-                     "Dieses Spiel gehört nicht zu deinem Meta-Konto. Es wird nichts geladen.")
-        }
+        if let why = accountBlocker(for: game) { return why }
+        if owned(game) == .no { return notOwnedText(game) }
+        if game.otherSourceInstalled { return otherSourceText(game) }
         if let why = freeAccountBlocker(for: game) { return why }
         if !game.status.userProvidedMissing.isEmpty { return L("Files that you provide yourself are missing (see below).", "Es fehlen Dateien, die du selbst bereitstellst (siehe unten).") }
         if let extra = missingExtras(for: game).first {
@@ -831,6 +1031,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Warum nicht installiert wird, solange dasselbe Spiel aus der anderen Kaufquelle auf dem Gerät liegt.
+    func otherSourceText(_ game: Game) -> String {
+        let new = AppModel.name(game.recipe.source), old = game.recipe.source == .steam ? "Meta" : "Steam"
+        return L("The \(old) version of this game is on the Vision Pro. The \(new) version is a different build with its own files and its own saved games and cannot be installed over it. Remove the game on the headset first (press and hold its icon, “Remove App”). Note: removing the app also deletes the saved games of the \(old) version on the headset. Copies of them that this app has already fetched stay on this Mac.",
+                 "Auf der Vision Pro liegt die \(old)-Fassung dieses Spiels. Die \(new)-Fassung ist ein anderer Stand mit eigenen Dateien und eigenen Spielständen und lässt sich nicht darüber installieren. Entferne das Spiel zuerst auf dem Headset (Symbol gedrückt halten, „App entfernen“). Achtung: Beim Entfernen löscht das Headset auch die Spielstände der \(old)-Fassung. Kopien davon, die diese App schon geholt hat, bleiben auf diesem Mac.")
+    }
+
     // MARK: Aufträge
 
     func install(_ game: Game) {
@@ -846,11 +1053,8 @@ final class AppModel: ObservableObject {
         if game.draft, !game.prepared {
             return prepareNote[game.id] ?? L("The files of this game have not been looked up yet.", "Die Dateien dieses Spiels sind noch nicht nachgeschlagen.")
         }
-        if game.needsMetaAccount, account != .signedIn { return L("Sign in to Meta first (see “Setup”).", "Erst bei Meta anmelden (siehe „Einrichtung“).") }
-        if owned(game) == .no {
-            return L("This game is not in your Meta account, so nothing is downloaded.",
-                     "Dieses Spiel gehört nicht zu deinem Meta-Konto. Es wird nichts geladen.")
-        }
+        if let why = accountBlocker(for: game) { return why }
+        if owned(game) == .no { return notOwnedText(game) }
         if isBusy(game.id) { return L("A job for this game is already running.", "Für dieses Spiel läuft schon ein Auftrag.") }
         if let free = freeBytes, game.status.bytesToDownload + 2_000_000_000 > free {
             return L("Not enough free space on this Mac: \(Installer.gigabytes(game.status.bytesToDownload)) to download, \(Installer.gigabytes(free)) free.",
@@ -876,8 +1080,11 @@ final class AppModel: ObservableObject {
         if toolchain == nil { return L("The toolchain is not installed yet (see “Setup”).", "Die Toolchain ist noch nicht installiert (siehe „Einrichtung“).") }
         if device == nil { return deviceProblem ?? L("The Vision Pro is not reachable.", "Die Vision Pro ist nicht erreichbar.") }
         if !game.installed { return L("Install the game first – this only adds to a game that is on the Vision Pro.", "Erst das Spiel installieren – das hier ergänzt nur ein Spiel, das schon auf der Vision Pro ist.") }
-        if account != .signedIn { return L("Sign in to Meta first (see “Setup”).", "Erst bei Meta anmelden (siehe „Einrichtung“).") }
-        if owned(game) == .no { return L("This game is not in your Meta account, so nothing is downloaded.", "Dieses Spiel gehört nicht zu deinem Meta-Konto. Es wird nichts geladen.") }
+        if game.needsSteamAccount ? !steamSignedIn : account != .signedIn {
+            return game.needsSteamAccount ? L("Sign in to Steam first (see “Setup”).", "Erst bei Steam anmelden (siehe „Einrichtung“).")
+                                          : L("Sign in to Meta first (see “Setup”).", "Erst bei Meta anmelden (siehe „Einrichtung“).")
+        }
+        if owned(game) == .no { return notOwnedText(game) }
         if isBusy(game.id) { return L("A job for this game is already running.", "Für dieses Spiel läuft schon ein Auftrag.") }
         return nil
     }
@@ -938,6 +1145,9 @@ final class AppModel: ObservableObject {
         if downloadOnly { request.downloadOnly = true }
         request.team = teamId
         request.device = device?.udid
+        // Ein Spiel aus Steam: Valves Werkzeug fragt und lädt mit der Anmeldung dieses Kontos.
+        if recipe.source == .steam, !steamAccount.isEmpty { request.steamAccount = steamAccount }
+        if !game.otherSourceBuilds.isEmpty { request.otherSourceBuilds = game.otherSourceBuilds }
         let chosen = options(for: game)
         request.locales = chosen.locales
         request.optionalNames = chosen.optionalNames
@@ -967,7 +1177,7 @@ final class AppModel: ObservableObject {
         games.filter { game in
             switch game.status.onDevice {
             case .olderToolchain, .olderGame, .unstamped: return blocker(for: game) == nil
-            case .current, .notInstalled, .unknown: return false
+            case .current, .notInstalled, .unknown, .otherSource: return false
             }
         }
     }

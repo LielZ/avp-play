@@ -36,7 +36,8 @@ extension AppModel {
     func storeUpdate(for game: Game) -> CatalogBuild? {
         // Eine Fassung, zu der das Projekt selbst ein Rezept führt, ist kein ungetestetes Angebot: Wer bewusst eine
         // ältere geprüfte gewählt hat, findet die neuere in der Liste der Fassungen.
-        guard !game.draft, let build = storeBuilds[game.id], StoreUpdate.isOffered(build, for: game.recipe),
+        // Nur für die Fassung aus dem Meta-Store: Was der Store dort führt, sagt nichts über die aus Steam.
+        guard !game.draft, game.recipe.source == .meta, let build = storeBuilds[game.id], StoreUpdate.isOffered(build, for: game.recipe),
               !game.verifiedVersions.contains(where: { $0.versionCode == build.versionCode }) else { return nil }
         return build
     }

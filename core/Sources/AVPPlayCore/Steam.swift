@@ -303,11 +303,71 @@ enum SteamRun {
         return listed && active ? .owned : .unclear
     }
 
+    /// Was ein Lauf mit mehreren `licenses_for_app` über jede der gefragten Apps sagt: `true` bei einer aktiven
+    /// Lizenz, `false` beim festen Satz für „keine“, kein Eintrag, wenn die Ausgabe zu der App nichts Klares sagt.
+    ///
+    /// Eine Lizenz steht als Block da: „License packageID …“, darunter „State : Active …“ und „Apps : 1408230, …“.
+    /// Ein Paket kann mehrere Apps nennen; besessen ist eine App, die in einem aktiven Block steht.
+    static func licences(_ output: String, apps: [String]) -> [String: Bool] {
+        var answers: [String: Bool] = [:]
+        var active = false
+        for raw in output.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("License packageID") { active = false; continue }
+            if line.hasPrefix("- State") { active = line.contains("Active"); continue }
+            if line.hasPrefix("- Apps"), active, let colon = line.firstIndex(of: ":") {
+                let list = line[line.index(after: colon)...].prefix { $0 != "(" }
+                for id in list.split(whereSeparator: { !$0.isNumber }) where apps.contains(String(id)) { answers[String(id)] = true }
+                continue
+            }
+            let none = "No active license found for appID "
+            if let range = line.range(of: none) {
+                let id = String(line[range.upperBound...].prefix { $0.isNumber })
+                if apps.contains(id), answers[id] == nil { answers[id] = false }
+            }
+        }
+        return answers
+    }
+
     static func depotComplete(_ output: String, depot: String) -> Bool {
         // „depot_1006“ darf nicht für Depot 100 gelten: nach der Kennung folgt keine weitere Ziffer.
         output.split(whereSeparator: \.isNewline).contains {
             $0.contains("Depot download complete") && $0.range(of: "depot_\(depot)(?![0-9])", options: .regularExpression) != nil
         }
+    }
+}
+
+/// Fragt Steam, welche Apps einem Konto gehören – das Spiel selbst und seine Zusatzinhalte. Es fragt Valves
+/// eigenes Werkzeug mit der Anmeldung des Nutzers; was Steam nicht klar beantwortet, gilt nicht als besessen.
+public struct SteamLicences: Sendable {
+    public let tool: SteamTool
+    public let account: String
+
+    public init(tool: SteamTool = SteamTool(), account: String) {
+        self.tool = tool
+        self.account = account
+    }
+
+    /// - Returns: je gefragter App `true` (aktive Lizenz) oder `false` (keine); ohne Eintrag, wo Steam nichts
+    ///   Klares sagt.
+    public func owned(apps: [String], shouldStop: @escaping @Sendable () -> Bool = { false }) throws -> [String: Bool] {
+        guard SteamTool.isAccountName(account) else { throw SteamError.badAccountName }
+        func digits(_ s: String) -> Bool { (1...24).contains(s.count) && s.allSatisfy { $0.isASCII && $0.isNumber } }
+        guard !apps.isEmpty, apps.allSatisfy(digits) else { throw SteamError.badRecipe }
+        try tool.verify()
+        var answers: [String: Bool] = [:]
+        // In Gruppen: Die Argumente eines Laufs sollen überschaubar bleiben, und ein Spiel mit hundert
+        // Zusatzinhalten ist denkbar.
+        for start in stride(from: 0, to: apps.count, by: 48) {
+            let group = Array(apps[start..<min(start + 48, apps.count)])
+            let run = try tool.run(["+@NoPromptForPassword", "1", "+login", account]
+                                   + group.flatMap { ["+licenses_for_app", $0] } + ["+quit"], shouldStop: shouldStop)
+            guard run.status == 0, !SteamRun.loginFailed(run.output) else {
+                throw SteamError.notSignedIn(SteamRun.failureLine(run.output))
+            }
+            answers.merge(SteamRun.licences(run.output, apps: group)) { _, new in new }
+        }
+        return answers
     }
 }
 

@@ -19,6 +19,16 @@ public struct OwnershipCache: Sendable {
     public let url: URL
     public init(store: ContentStore) { url = store.root.appendingPathComponent("ownership.json") }
 
+    /// Unter welchem Schlüssel die Antwort für ein Rezept liegt: die Store-App-ID bei Meta, bei Steam dessen
+    /// App-ID mit Vorsatz – die Nummern beider Stores könnten sonst zusammenfallen.
+    public static func key(for recipe: Recipe) -> String? {
+        switch recipe.source {
+        case .meta: return recipe.store.appId
+        case .steam: return recipe.store.steamAppId.map { "steam:\($0)" }
+        case nil: return nil
+        }
+    }
+
     public func load() -> [String: OwnershipRecord] {
         guard let data = try? Data(contentsOf: url) else { return [:] }
         return (try? JSONDecoder.iso.decode([String: OwnershipRecord].self, from: data)) ?? [:]

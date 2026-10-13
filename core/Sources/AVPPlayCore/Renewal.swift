@@ -97,9 +97,11 @@ public enum Renewal {
     /// Die mitgelieferten Rezepte und die Entwürfe für nachgeschlagene Spiele; ein mitgeliefertes Rezept für
     /// dieselbe Store-App geht vor (wie in der Übersicht der App).
     public static func recipes(bundled: URL?, drafts: URL) -> [Recipe] {
+        OtherSources.use(recipes: bundled)
         // Wo der Nutzer die neueste Fassung aus dem Store gewählt hat, wird auch die erneuert (StoreUpdate).
         let shipped = StoreUpdate.resolve(bundled.flatMap { try? RecipeStore(directory: $0).loadAll() } ?? [],
-                                          variants: bundled.map { RecipeStore(directory: $0).loadVariants() } ?? [], drafts: drafts)
+                                          variants: bundled.map { RecipeStore(directory: $0).loadVariants() } ?? [],
+                                          sources: bundled.map { RecipeStore(directory: $0).loadSources() } ?? [], drafts: drafts)
         let known = Set(shipped.compactMap { $0.store.appId })
         let extra = ((try? RecipeStore(directory: drafts).loadAll()) ?? [])
             .filter { r in r.id.hasPrefix("store-") && !(r.store.appId.map(known.contains) ?? true) }

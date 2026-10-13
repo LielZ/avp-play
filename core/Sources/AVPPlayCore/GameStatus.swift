@@ -16,6 +16,9 @@ public struct GameStatus: Sendable, Equatable {
         case olderGame(stamp: String)
         /// Installiert, aber eine andere Spielversion oder ohne Stempel dieses Werkzeugs.
         case unstamped(stamp: String)
+        /// Installiert ist dasselbe Spiel aus einer anderen Kaufquelle (die Meta-Fassung, wo Steam gewählt ist,
+        /// oder umgekehrt). Darüber wird nicht installiert.
+        case otherSource(stamp: String)
     }
 
     /// Pflichtdateien, die vollständig im Bestand liegen, und ihre Gesamtzahl.
@@ -38,8 +41,10 @@ public struct GameStatus: Sendable, Equatable {
     /// - Parameter toolchainVersion: ab welcher Toolchain-Nummer ein gebautes Spiel als aktuell gilt
     ///   (`Toolchain.appRevision()`), nicht zwingend die Nummer der installierten Toolchain.
     /// - Parameter bundlePrefix: das Präfix, unter dem die Spiele installiert werden; ohne Angabe das übliche.
+    /// - Parameter otherSourceBuilds: die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle
+    ///   installiert wäre.
     public static func of(recipe r: Recipe, store: ContentStore, apps: [InstalledApp]?, toolchainVersion: Int?,
-                          bundlePrefix: String? = nil) -> GameStatus {
+                          bundlePrefix: String? = nil, otherSourceBuilds: Set<Int> = []) -> GameStatus {
         // Was Meta diesem Konto nicht ausliefert (ein nicht gekaufter Zusatzinhalt, siehe `ContentStore.Withheld`),
         // fehlt nicht: Es wird nie geladen und steht dem Spiel nicht im Weg. Ohne das stünde bei einem Spiel wie
         // Maestro für immer „3 von 11 Dateien“, obwohl alles da ist, was dem Konto zusteht.
@@ -51,7 +56,10 @@ public struct GameStatus: Sendable, Equatable {
         let missing = required.filter { !present($0) }
         let trees = r.trees ?? []
         let treesMissing = TreeStore(store: store).missing(recipe: r)
-        var byUser = missing.filter { $0.source?.kind == .user }.map { f in f.source?.hint.map { "\(f.name) – \($0)" } ?? f.name }
+        // Bei einem Spiel aus Steam holt das Programm die Dateien selbst aus dem Steam-Kauf, als Teil des Auftrags;
+        // sie sind dort kein „selbst bereitzustellen“, sondern ein Download wie aus dem Meta-Store.
+        func ownToProvide(_ f: RecipeFile) -> Bool { f.source?.kind == .user && !(r.source == .steam && f.source?.steam != nil) }
+        var byUser = missing.filter(ownToProvide).map { f in f.source?.hint.map { "\(f.name) – \($0)" } ?? f.name }
         byUser += treesMissing.filter { $0.source.kind == .user }.map { t in t.source.hint.map { "\(t.name) – \($0)" } ?? t.name }
 
         var onDevice = OnDevice.unknown
@@ -63,6 +71,9 @@ public struct GameStatus: Sendable, Equatable {
                    b.hasPrefix("\(r.versionCode).") {
                     let built = Int(b.split(separator: ".").last ?? "") ?? 0
                     onDevice = (toolchainVersion.map { built < $0 } ?? false) ? .olderToolchain(stamp: stamp) : .current(stamp: stamp)
+                } else if let b = app.bundleVersion, let installed = Int(b.split(separator: ".").first ?? ""),
+                          b.split(separator: ".").count == 2, otherSourceBuilds.contains(installed) {
+                    onDevice = .otherSource(stamp: stamp)
                 } else if let b = app.bundleVersion, let installed = Int(b.split(separator: ".").first ?? ""),
                           b.split(separator: ".").count == 2, installed > 0, installed < r.versionCode {
                     // Der Stempel dieses Werkzeugs ist „<Versionscode>.<Toolchain>“: Eine kleinere erste Zahl ist
@@ -77,9 +88,9 @@ public struct GameStatus: Sendable, Equatable {
         }
         return GameStatus(filesPresent: required.count - missing.count, filesRequired: required.count,
                           treesPresent: trees.count - treesMissing.count, treesRequired: trees.count,
-                          bytesToDownload: missing.filter { $0.source?.kind != .user }.reduce(0) { $0 + ($1.size ?? 0) }
+                          bytesToDownload: missing.filter { !ownToProvide($0) }.reduce(0) { $0 + ($1.size ?? 0) }
                               + treesMissing.filter { $0.source.kind == .url }.reduce(0) { $0 + ($1.source.archive?.size ?? 0) },
-                          filesToDownload: missing.filter { $0.source?.kind != .user }.count + treesMissing.filter { $0.source.kind == .url }.count,
+                          filesToDownload: missing.filter { !ownToProvide($0) }.count + treesMissing.filter { $0.source.kind == .url }.count,
                           userProvidedMissing: byUser, onDevice: onDevice)
     }
 }

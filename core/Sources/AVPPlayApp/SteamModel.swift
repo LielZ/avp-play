@@ -126,7 +126,7 @@ struct SteamCard: View {
     @State private var showLogin = false
 
     var body: some View {
-        CheckCard(title: L("Steam Account (for Doom 3 and Half-Life: Alyx)", "Steam-Konto (für Doom 3 und Half-Life: Alyx)"), state: model.steamSignedIn ? .ok : .missing, detail: detail) {
+        CheckCard(title: L("Steam Account (for games you bought on Steam)", "Steam-Konto (für Spiele, die du bei Steam gekauft hast)"), state: model.steamSignedIn ? .ok : .missing, detail: detail) {
             HStack {
                 if !model.steamToolPresent {
                     Button(L("Get SteamCMD from Valve", "SteamCMD von Valve holen")) { model.setUpSteam() }.disabled(model.steamSettingUp)
@@ -162,8 +162,8 @@ struct SteamCard: View {
             return L("Signed in as \(model.steamAccount). SteamCMD remembers the sign-in in its own folder; the app stores only the account name.",
                      "Angemeldet als \(model.steamAccount). SteamCMD merkt sich die Anmeldung in seinem eigenen Ordner; die App speichert nur den Kontonamen.")
         }
-        return L("Not signed in. Only needed for Doom 3 and Half-Life: Alyx: with a sign-in the app fetches their game files from your own Steam purchase – Steam only hands out what your account owns. You can also point the app at a folder with the files instead.",
-                 "Nicht angemeldet. Nur für Doom 3 und Half-Life: Alyx nötig: Mit einer Anmeldung holt die App deren Spieldateien aus deinem eigenen Steam-Kauf – Steam gibt nur heraus, was deinem Konto gehört. Stattdessen kannst du der App auch einen Ordner mit den Dateien zeigen.")
+        return L("Not signed in. Only needed for games from your own Steam purchases – Doom 3, Half-Life: Alyx, and games you can choose Steam for as the purchase source, such as Walkabout Mini Golf. With a sign-in the app checks your purchase and fetches the game files; Steam only hands out what your account owns. For Doom 3 and Half-Life: Alyx you can also point the app at a folder with the files instead.",
+                 "Nicht angemeldet. Nur für Spiele aus deinem eigenen Steam-Kauf nötig – Doom 3, Half-Life: Alyx und Spiele, bei denen du Steam als Kaufquelle wählen kannst, etwa Walkabout Mini Golf. Mit einer Anmeldung prüft die App deinen Kauf und holt die Spieldateien; Steam gibt nur heraus, was deinem Konto gehört. Für Doom 3 und Half-Life: Alyx kannst du der App stattdessen auch einen Ordner mit den Dateien zeigen.")
     }
 }
 

@@ -78,7 +78,7 @@ extension AppModel {
         case .incompatible: label = L("incompatible", "inkompatibel")
         }
         let installed: Bool? = { if case .unknown = game.status.onDevice { return nil }; return game.installed }()
-        return GameList.Entry(title: game.recipe.title, storeId: game.recipe.store.appId ?? "", version: game.recipe.versionName,
+        return GameList.Entry(title: game.recipe.title, storeId: game.recipe.catalogAppId ?? "", version: game.recipe.versionName,
                               label: label, downloaded: game.downloaded, installed: installed)
     }
 

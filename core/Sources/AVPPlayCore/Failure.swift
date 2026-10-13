@@ -40,6 +40,16 @@ public enum FailureKind: String, Codable, Sendable {
             case .appNotInstalled: return .build
             case .badIcon: return .other
             case .notANativeApp, .wrongArchitecture: return .unsupported
+            case .steamAccountMissing: return .signIn
+            // Erst vom Gerät entfernen: ein Handgriff dort, wie bei einer App, die gerade läuft.
+            case .otherSourceInstalled: return .device
+            }
+        case let e as SteamError:
+            switch e {
+            case .notSignedIn, .badAccountName: return .signIn
+            case .notOwned: return .notOwned
+            case .toolMissing, .needsRosetta, .wrongSigner, .toolDownloadFailed: return .setup
+            default: return .download
             }
         case let e as MetaError:
             if case .tokenRejected = e { return .signIn }

@@ -117,6 +117,8 @@ avpplay – command line for the AVP Play core library
   avpplay job resume <job>                     resume an interrupted or stopped job
   avpplay job show|cancel <job>                show progress / cancel            avpplay jobs   all jobs
              --device <UDID>  --bundle-id <ID>  --toolchain <folder>  --no-addons
+             --source steam          the game as bought on Steam instead of from the Meta Store (where the project has a
+                                     recipe for it); needs --steam-account <name>
              --icon <image file>     use your own app icon (takes priority over everything else)
              --no-store-art          don't fetch the cover image from the store page (the icon from the APK is used instead)
              --replace-running       install even if the game is running (it will be quit)
@@ -167,6 +169,8 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay job resume <Auftrag>                 unterbrochenen oder angehaltenen Auftrag fortsetzen
   avpplay job show|cancel <Auftrag>            Stand zeigen / abbrechen          avpplay jobs   alle Aufträge
              --device <UDID>  --bundle-id <ID>  --toolchain <Ordner>  --no-addons
+             --source steam          das Spiel aus dem Steam-Kauf statt aus dem Meta-Store (wo das Projekt ein Rezept
+                                     dafür führt); braucht --steam-account <Name>
              --icon <Bilddatei>      eigenes App-Icon hinterlegen (hat Vorrang vor allem anderen)
              --no-store-art          kein Titelbild von der Store-Seite holen (dann Icon aus dem APK)
              --replace-running       auch installieren, wenn das Spiel gerade läuft (es wird dabei beendet)
@@ -185,14 +189,41 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 """)
 }
 
-let valued: Set<String> = ["account", "steam-account", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
+let valued: Set<String> = ["account", "steam-account", "source", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
                            "team", "device", "bundle-id", "toolchain", "icon", "tool", "jobs", "toolchains", "saves"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
+OtherSources.use(recipes: recipesDirectory(o))
 
-func recipe(_ o: Options) -> Recipe {
-    guard o.positional.count >= 2 else { fail(L("The recipe ID is missing.\n\n", "Rezept-Kennung fehlt.\n\n") + usage()) }
-    do { return try RecipeStore(directory: recipesDirectory(o)).load(id: o.positional[1]) } catch { fail("\(error)") }
+/// Das Rezept eines Spiels. Mit `--source steam` das für die andere Kaufquelle (`recipes/sources`); ohne die
+/// Angabe gilt, was in der App für das Spiel gewählt ist.
+func recipe(_ o: Options, at index: Int = 1) -> Recipe {
+    guard o.positional.count > index else { fail(L("The recipe ID is missing.\n\n", "Rezept-Kennung fehlt.\n\n") + usage()) }
+    do {
+        let recipes = RecipeStore(directory: recipesDirectory(o))
+        let shipped = try recipes.load(id: o.positional[index])
+        var wanted = StoreUpdate.Choices.load().sources[shipped.id]
+        if let named = o.value("source") {
+            guard let source = Recipe.Source(rawValue: named) else {
+                fail(L("Unknown purchase source '\(named)' (meta or steam).", "Unbekannte Kaufquelle '\(named)' (meta oder steam)."))
+            }
+            wanted = source
+        }
+        guard let wanted, wanted != shipped.source else { return shipped }
+        guard let other = recipes.loadSources().first(where: { $0.id == shipped.id && $0.source == wanted }) else {
+            // Nur wer die Quelle ausdrücklich nennt, bekommt gesagt, dass es sie nicht gibt.
+            if o.value("source") == nil { return shipped }
+            fail(L("There is no \(wanted.rawValue) recipe for \(shipped.title).", "Für \(shipped.title) gibt es kein Rezept aus \(wanted.rawValue)."))
+        }
+        return other
+    } catch { fail("\(error)") }
+}
+
+/// Die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle als der von `recipe` installiert wäre.
+func otherSourceBuilds(of recipe: Recipe, _ o: Options) -> [Int] {
+    let recipes = RecipeStore(directory: recipesDirectory(o))
+    let all = ((try? recipes.loadAll()) ?? []) + recipes.loadVariants() + recipes.loadSources()
+    return all.filter { $0.id == recipe.id && $0.source != recipe.source }.map(\.versionCode)
 }
 
 func toolchainPackager(_ o: Options) -> ToolchainPackager {
@@ -220,6 +251,7 @@ func installRequest(_ o: Options) -> InstallRequest {
     request.team = o.value("team")
     request.device = o.value("device")
     request.bundleId = o.value("bundle-id")
+    request.steamAccount = o.value("steam-account")
     request.customIcon = o.value("icon").map { URL(fileURLWithPath: $0).standardizedFileURL.path }
     request.storeArt = !o.flags.contains("no-store-art")
     if o.flags.contains("replace-running") { request.replaceRunning = true }
@@ -651,7 +683,9 @@ case "install", "stage":
         fail(L("For 'install', give the Apple Team ID with --team.", "Für 'install' die Apple-Team-ID mit --team angeben."))
     }
     let copying = CopyProgressPrinter()
-    let installer = Installer(recipe: r, request: installRequest(o), store: contentStore(o), progress: { copying.show($0) }) { print($0) }
+    var request = installRequest(o)
+    request.otherSourceBuilds = otherSourceBuilds(of: r, o)
+    let installer = Installer(recipe: r, request: request, store: contentStore(o), progress: { copying.show($0) }) { print($0) }
     do {
         for step in (command == "install" ? [.account, .build, .stage, .unlock] : [.account, .stage, .unlock]) as [InstallStep] {
             try await installer.perform(step)
@@ -829,6 +863,8 @@ case "status":
                 geraet = L("installed, \(stamp) – an older version of the game", "installiert, \(stamp) – eine ältere Fassung des Spiels")
             case .unstamped(let stamp):
                 geraet = L("installed, \(stamp) – without this tool's stamp", "installiert, \(stamp) – ohne Stempel dieses Werkzeugs")
+            case .otherSource(let stamp):
+                geraet = L("installed, \(stamp) – from another purchase source", "installiert, \(stamp) – aus einer anderen Kaufquelle")
             }
             print("\(r.id.padding(toLength: 13, withPad: " ", startingAt: 0)) \(r.title) \(r.versionName)")
             print(L("              Library: \(bestand)   Device: \(geraet)", "              Bestand: \(bestand)   Gerät: \(geraet)"))
@@ -881,9 +917,9 @@ case "job":
         if o.value("team") == nil, !addonsOnly, !downloadOnly {
             fail(L("For a job, give the Apple Team ID with --team.", "Für einen Auftrag die Apple-Team-ID mit --team angeben."))
         }
-        let r: Recipe
-        do { r = try RecipeStore(directory: recipesDirectory(o)).load(id: o.positional[2]) } catch { fail("\(error)") }
+        let r = recipe(o, at: 2)
         var request = installRequest(o)
+        request.otherSourceBuilds = otherSourceBuilds(of: r, o)
         if addonsOnly { request.addons = true }
         if downloadOnly { request.downloadOnly = true }
         do {

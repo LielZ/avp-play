@@ -134,7 +134,12 @@ public struct SaveStore: Sendable {
     public static let kept = 12
 
     /// Woran ein Spiel wiedererkannt wird, auch wenn aus einem Entwurf ein mitgeliefertes Rezept wird.
-    public static func key(for recipe: Recipe) -> String { recipe.store.appId ?? recipe.id }
+    public static func key(for recipe: Recipe) -> String {
+        // Dasselbe Spiel aus Steam hat eigene Spielstände (eigene Ordner, eigenes Konto im Spiel): Sie liegen
+        // getrennt von denen der Fassung aus dem Meta-Store und werden nicht in die andere zurückgespielt.
+        if recipe.source == .steam, let steam = recipe.store.steamAppId { return "steam-\(steam)" }
+        return recipe.store.appId ?? recipe.id
+    }
 
     /// Der Ordner eines Spiels: sein Name, damit ein Mensch ihn findet, und in Klammern die Kennung, an der das
     /// Programm ihn wiederfindet. Gibt es schon einen mit dieser Kennung, gilt der – auch unter älterem Namen.
@@ -234,7 +239,11 @@ public struct SaveSync: Sendable {
         let target = recipe.toolchain.target
         let candidates = [SigningRecord.load(store: store, recipe: recipe)?.bundleId,
                           Toolchain.bundleId(target: target, prefix: prefix), Toolchain.defaultBundleId(target: target)].compactMap { $0 }
-        return candidates.first { bundle in apps.contains { $0.bundleIdentifier == bundle } }
+        // Dasselbe Spiel aus der anderen Kaufquelle liegt unter derselben Kennung, hat aber eigene Spielstände: Für
+        // dieses Rezept ist es nicht installiert – sonst lägen die Stände der einen Fassung bei der anderen.
+        return candidates.first { bundle in
+            apps.contains { $0.bundleIdentifier == bundle && !OtherSources.owns($0, insteadOf: recipe) }
+        }
     }
 
     static func stampName(_ date: Date) -> String {

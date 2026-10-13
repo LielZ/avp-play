@@ -25,6 +25,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public struct IconSource: Codable, Sendable, Equatable {
         /// Steam-App-ID: Hintergrund und Logo aus dem lokalen Bildspeicher des Steam-Clients des Nutzers.
         public var steamAppId: String?
+        /// Store-App-ID bei Meta, wenn das Rezept selbst nicht aus dem Meta-Store kommt, das Spiel dort aber eine
+        /// Seite hat: Von ihr stammen dann Titelbild und Icon, und unter ihr führt der Katalog des Projekts das Spiel.
+        public var metaAppId: String?
     }
 
     public struct StoreInfo: Codable, Sendable {
@@ -33,11 +36,31 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// Das Spiel bleibt bei der Fassung dieses Rezepts: eine neuere aus dem Store wird nicht angeboten.
         /// Für Spiele, deren neuere Fassungen bekanntermaßen nicht laufen (Beat Saber).
         public var pinned: Bool?
+        /// Steam-App-ID, wenn dieses Rezept das Spiel aus einem Steam-Kauf beschreibt (die Android-Fassung, die
+        /// Steam ausliefert). Besitz und Zusatzinhalte bestätigt dann Steam, nicht Meta; `appId` fehlt.
+        public var steamAppId: String?
 
-        public init(appId: String?, pinned: Bool? = nil) {
+        public init(appId: String?, pinned: Bool? = nil, steamAppId: String? = nil) {
             self.appId = appId
             self.pinned = pinned
+            self.steamAppId = steamAppId
         }
+    }
+
+    /// Woher ein Spiel gekauft ist – und wer deshalb Besitz und Zusatzinhalte bestätigt.
+    public enum Source: String, Codable, Sendable, CaseIterable {
+        case meta, steam
+    }
+
+    /// Unter welcher Meta-Store-App das Spiel im Katalog und im Store zu finden ist – auch wenn dieses Rezept es
+    /// aus einer anderen Kaufquelle beschreibt.
+    public var catalogAppId: String? { store.appId ?? icon?.metaAppId }
+
+    /// Die Kaufquelle dieses Rezepts; `nil` bei einer Sonderapp, die zu keinem Store-Titel gehört.
+    public var source: Source? {
+        if store.appId != nil { return .meta }
+        if store.steamAppId != nil { return .steam }
+        return nil
     }
     public struct Toolchain: Codable, Sendable {
         public var target: String
@@ -136,6 +159,9 @@ public struct Addons: Codable, Sendable {
     public var kind: Kind
     public var dest: String?
     public var items: [AddonItem]?
+    /// Für ein Spiel aus Steam: die App-IDs seiner Zusatzinhalte. Für jede wird Steam gefragt, ob das Konto sie
+    /// besitzt; die bestätigten bilden die Kaufliste.
+    public var steamApps: [String]?
 }
 
 public struct AddonItem: Codable, Sendable, Hashable {
@@ -173,6 +199,14 @@ extension Recipe {
     public func validate() throws {
         guard schema == Recipe.supportedSchema else { throw RecipeError.unsupportedSchema(schema) }
         guard Recipe.isSafeName(id) else { throw RecipeError.invalid(L("identifier '\(id)'", "Kennung '\(id)'")) }
+        // Steam-Kennungen werden zu Argumenten für Valves Werkzeug: nur Ziffern. Und ein Rezept hat eine Kaufquelle.
+        func steamId(_ s: String) -> Bool { (1...24).contains(s.count) && s.allSatisfy { $0.isASCII && $0.isNumber } }
+        if let steam = store.steamAppId {
+            guard steamId(steam), store.appId == nil else { throw RecipeError.invalid(L("Steam app ID", "Steam-App-ID")) }
+        }
+        guard (addons?.steamApps ?? []).allSatisfy(steamId) else {
+            throw RecipeError.invalid(L("Steam add-on IDs", "Steam-Kennungen der Zusatzinhalte"))
+        }
         var names = Set<String>()
         let addonFiles = (addons?.items ?? []).map { $0.asFile(dest: addons?.dest) }
         for f in files + addonFiles {
@@ -293,6 +327,45 @@ extension Recipe {
 }
 
 /// Lädt Rezepte aus einem Ordner. Ein Rezept, das die Prüfung nicht besteht, wird nicht geladen.
+/// Unter welchen Versionscodes dasselbe Spiel aus einer anderen Kaufquelle installiert wäre – gefragt von allem,
+/// was eine Installation auf dem Gerät einem Rezept zuordnet (Spielstände holen und zurückspielen): Beide
+/// Fassungen liegen unter derselben Kennung auf dem Gerät, gehören aber nicht zusammen.
+///
+/// App, Kommandozeile und Hintergrunddienst nennen einmal den Ordner der mitgelieferten Rezepte; ohne ihn gilt
+/// nichts als fremd, wie vor den Kaufquellen.
+public enum OtherSources {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var directory: URL?
+    nonisolated(unsafe) private static var cache: [String: Set<Int>] = [:]
+
+    public static func use(recipes: URL?) {
+        lock.lock(); defer { lock.unlock() }
+        guard directory != recipes else { return }
+        directory = recipes
+        cache = [:]
+    }
+
+    public static func builds(of recipe: Recipe) -> Set<Int> {
+        lock.lock(); defer { lock.unlock() }
+        guard let directory, let source = recipe.source else { return [] }
+        let key = "\(recipe.id)/\(source.rawValue)"
+        if let known = cache[key] { return known }
+        let store = RecipeStore(directory: directory)
+        let family = ((try? store.load(id: recipe.id)).map { [$0] } ?? [])
+            + store.loadVariants().filter { $0.id == recipe.id } + store.loadSources().filter { $0.id == recipe.id }
+        let codes = Set(family.filter { $0.source != source }.map(\.versionCode))
+        cache[key] = codes
+        return codes
+    }
+
+    /// Stammt die installierte App aus der anderen Kaufquelle? Ihr Stempel ist „<Versionscode>.<Toolchain>“.
+    public static func owns(_ app: InstalledApp, insteadOf recipe: Recipe) -> Bool {
+        guard let parts = app.bundleVersion?.split(separator: "."), parts.count == 2, let code = Int(parts[0]),
+              code != recipe.versionCode else { return false }
+        return builds(of: recipe).contains(code)
+    }
+}
+
 public struct RecipeStore: Sendable {
     public let directory: URL
     public init(directory: URL) { self.directory = directory }
@@ -313,6 +386,24 @@ public struct RecipeStore: Sendable {
         let recipe = try JSONDecoder().decode(Recipe.self, from: Data(contentsOf: url))
         try recipe.validate()
         return recipe
+    }
+
+    /// Der Unterordner mit Rezepten für eine andere Kaufquelle: `sources/<Kennung>.steam.json`.
+    public static let sourcesFolder = "sources"
+
+    /// Rezepte für dasselbe Spiel aus einer anderen Kaufquelle als der des Rezepts im Ordner selbst – bisher nur
+    /// Steam. Ein Rezept hier trägt die Kennung seines Spiels, nennt die Steam-App und heißt nach Kennung und
+    /// Quelle; was dazu nicht passt oder sich nicht lesen lässt, zählt nicht.
+    public func loadSources() -> [Recipe] {
+        let folder = directory.appendingPathComponent(RecipeStore.sourcesFolder, isDirectory: true)
+        let urls = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+        return urls.compactMap { url -> Recipe? in
+            guard let recipe = try? load(url: url), let source = recipe.source, source != .meta,
+                  url.deletingPathExtension().lastPathComponent == "\(recipe.id).\(source.rawValue)" else { return nil }
+            return recipe
+        }
+        .sorted { $0.id < $1.id }
     }
 
     /// Der Unterordner mit weiteren geprüften Fassungen: `versions/<Kennung>-<Versionscode>.json`.

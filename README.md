@@ -90,7 +90,7 @@ recipes in [`recipes/`](recipes) are:
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
 | Moss | Meta Store | |
-| Walkabout Mini Golf | Meta Store | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes |
+| Walkabout Mini Golf | Meta Store or Steam | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes. If you bought it on Steam instead, choose **Purchased from: Steam** on its page: the app then fetches the Android build Steam ships (for Steam Frame) from your Steam account and unlocks the add-ons Steam confirms for it. No older versions for the Steam copy |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network |
 | Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes; edge smoothing at 4x by default (a setting in the game's start window) |
@@ -133,7 +133,7 @@ their own recipe.
 - **Meta sign-in** runs through Meta's own tool. AVP Play is only the window in front of it: what you type goes
   to that tool and is not stored. The access token Meta returns is kept in the macOS keychain and nowhere else.
   It is sent only to Meta, only as a request header, and never appears in logs.
-- **Steam sign-in** (optional, for Doom 3 and Half-Life: Alyx) runs through Valve's own tool, SteamCMD. The app
+- **Steam sign-in** (optional, for Doom 3, Half-Life: Alyx and a Steam copy of Walkabout Mini Golf) runs through Valve's own tool, SteamCMD. The app
   downloads it straight from Valve, checks before every start that the program is signed by Valve, and gives it a
   folder of its own, apart from a Steam you may have installed. Your password and Steam Guard code go to that tool
   only. SteamCMD remembers the sign-in in that folder – this is the one credential that is not in the keychain,
@@ -141,6 +141,12 @@ their own recipe.
   Steam whether your account owns the game, and Steam itself only hands out what it does. You do not need Steam
   installed. Valve ships SteamCMD as an Intel program, so a Mac that has never run one needs Apple's Rosetta once;
   the Setup page says so and installs it at the click of a button.
+- **A game bought on Steam instead of at Meta** (Walkabout Mini Golf for now). When you open such a game for the
+  first time, or click "Check Purchase", the app asks Meta first and then Steam. Found at Meta: it stays with
+  Meta. Found only on Steam: it switches to Steam by itself. Found nowhere: it stays with Meta. You can also choose
+  yourself under "Purchased from". The two copies are different builds with saves of their own; the app does not
+  install one over the other – remove the installed one first (the headset deletes its saves with it; copies this
+  app has already fetched stay on your Mac).
 - **Steam Cloud saves for Half-Life: Alyx** (optional, new and still rough) are the one sign-in that happens on
   the headset: in the game's settings there you type your Steam name and password and confirm in the Steam app.
   The password goes to Steam, encrypted, and is not stored; the session Steam returns stays in the headset's
