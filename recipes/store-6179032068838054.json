@@ -1,0 +1,59 @@
+{
+ "files": [
+  {
+   "dest": "",
+   "id": "25281674918147149",
+   "localName": "vampire.apk",
+   "name": "Lollipop-Android-Shipping-arm64.apk",
+   "required": true,
+   "role": "apk",
+   "size": 64532507,
+   "sha256": "fbebd21ecb9358d93cd02596931016a0fbf1a51cbfa25f491b853429daf55706"
+  },
+  {
+   "dest": "@obb",
+   "id": "25281674061480568",
+   "name": "main.1653.com.fasttravelgames.lollipop.obb",
+   "required": true,
+   "role": "main-obb",
+   "size": 4288726167,
+   "sha256": "b4e0982d9616638a73359dbf3a68dc01e01286396c426ef02a55bf8229676e1a"
+  },
+  {
+   "dest": "android-files/Android/obb/com.fasttravelgames.lollipop",
+   "id": "25281669348147706",
+   "name": "patch.1653.com.fasttravelgames.lollipop.obb",
+   "required": true,
+   "role": "content-bundle",
+   "size": 2851766649,
+   "sha256": "42b4a04aad59004227617bff4b2433a0bbaac691c23c83942501351722d26916"
+  }
+ ],
+ "id": "store-6179032068838054",
+ "package": "com.fasttravelgames.lollipop",
+ "schema": 1,
+ "status": {
+  "playability": "verified",
+  "download": "proven",
+  "notes": [
+   {
+    "en": "Marked as verified by the project on 2026-10-13. File list as Meta's tool reports it for this build; 3 of 3 checksums recorded from a download.",
+    "de": "Vom Projekt am 2026-10-13 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 3 von 3 Prüfsummen aus einem Download erfasst."
+   },
+   {
+    "en": "Vampire: The Masquerade – Justice. Played by the author with PlayStation VR2 Sense controllers; about 7 GB.",
+    "de": "Vampire: The Masquerade – Justice. Vom Autor mit PlayStation-VR2-Sense-Controllern gespielt; etwa 7 GB."
+   }
+  ]
+ },
+ "store": {
+  "appId": "6179032068838054"
+ },
+ "title": "Vampire: The Masquerade - Justice",
+ "toolchain": {
+  "minCommit": "c595d8b",
+  "target": "vampire"
+ },
+ "versionCode": 1653,
+ "versionName": "1.00.1653"
+}
