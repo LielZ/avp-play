@@ -192,12 +192,29 @@ public enum SigningWarmUp {
         return (p.terminationStatus, String(decoding: outData, as: UTF8.self), String(decoding: errData, as: UTF8.self))
     }
 
+    private static func identities(team: String) -> [String] {
+        identities(team: team,
+                   validIdentities: run(["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"]).out,
+                   certificates: run(["/usr/bin/security", "find-certificate", "-a", "-c", "Apple Development", "-Z", "-p"]).out,
+                   subject: { run(["/usr/bin/openssl", "x509", "-noout", "-subject", "-startdate", "-nameopt", "RFC2253"], input: $0).out })
+    }
+
+    /// - Parameter note: bekommt eine Zeile, wenn vor der Probe etwas zu richten war (`AppleIntermediate`); ohne
+    ///   Angabe geht sie auf die Fehlerausgabe.
     @discardableResult
-    public static func run(team: String, timeout: TimeInterval = 120) throws -> Outcome {
-        let ids = identities(team: team,
-                             validIdentities: run(["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"]).out,
-                             certificates: run(["/usr/bin/security", "find-certificate", "-a", "-c", "Apple Development", "-Z", "-p"]).out,
-                             subject: { run(["/usr/bin/openssl", "x509", "-noout", "-subject", "-startdate", "-nameopt", "RFC2253"], input: $0).out })
+    public static func run(team: String, timeout: TimeInterval = 120,
+                           note: (String) -> Void = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }) throws -> Outcome {
+        var ids = identities(team: team)
+        // Kein gültiger Schlüssel, aber einer, dem nur Apples Zwischenzertifikat fehlt: Das ist kein Mac ohne
+        // Schlüssel. Erst das Zertifikat holen, dann noch einmal nachsehen.
+        // Gelingt das nicht, geht es weiter wie bisher – mit dem Grund als Zeile, denn der Bau scheitert dann
+        // voraussichtlich an derselben Stelle, an der er ohne diesen Versuch gescheitert wäre.
+        if ids.isEmpty, let gap = AppleIntermediate.missing(team: team) {
+            do {
+                note(try AppleIntermediate.add(gap.generation, for: gap.leaf))
+                ids = identities(team: team)
+            } catch { note("\(error)") }
+        }
         guard let identity = ids.first else { return .noKeyYet }
         // Eine schlichte Datei, kein Programm: Ein Programm für zwei Architekturen bekäme zwei Signaturen, und
         // ein einfaches „Erlauben“ deckt nur eine davon.

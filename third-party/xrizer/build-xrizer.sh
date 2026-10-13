@@ -28,6 +28,9 @@ git rev-parse HEAD > "$OUT/xrizer.rev"
 python3 "$OUT/xrizer-frame-timing.py"
 # The game's loading-screen messages, handed to the host instead of dropped.
 python3 "$OUT/xrizer-interstitials.py"
+# The dominant hand a game sets (Alyx's "Weapon Hand: Left"), kept and handed to
+# the host, which drives the bindings from the other controller.
+python3 "$OUT/xrizer-dominant-hand.py"
 cargo xbuild --release 2>&1 | tail -25
 rm -rf "$OUT/xrizer"
 mkdir -p "$OUT/xrizer/bin/linuxarm64"

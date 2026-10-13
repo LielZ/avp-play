@@ -9,12 +9,16 @@ Half-Life: Alyx downloads a ready-built copy of it, an aarch64 Linux `vrclient.s
 That file is upstream xrizer at the revision in `xrizer.rev` with two small changes. Everything needed to build it
 again is in this folder; the release also carries the complete patched source as an archive.
 
+A third change is in this folder and not yet in that download (the recipe still names the build with two): the
+build script applies it, so a build made here has it.
+
 | File | What it is |
 | --- | --- |
 | `xrizer.rev` | the upstream commit the build is made from |
 | `xrizer-frame-timing.py` | change 1: `IVRCompositor::GetFrameTiming` reports the measured frame time instead of constants, so the game's automatic quality level works |
 | `xrizer-interstitials.py` | change 2: the game's loading-screen messages are handed to the host instead of being dropped |
-| `build-xrizer.sh` | fetches upstream at that commit, applies both changes, builds `xrizer/bin/linuxarm64/vrclient.so` |
+| `xrizer-dominant-hand.py` | change 3 (not in the published build yet): the hand a game names with `IVRInput::SetDominantHand` — Half-Life: Alyx's “Weapon Hand: Left” — is kept and handed to the host, which then drives the bindings from the other controller |
+| `build-xrizer.sh` | fetches upstream at that commit, applies the changes, builds `xrizer/bin/linuxarm64/vrclient.so` |
 
 ## Building it yourself
 
@@ -27,4 +31,4 @@ The script installs what it needs (compiler, Rust, Vulkan and Wayland headers), 
 `xrizer/` next to itself. To use your own build instead of the download, put that `xrizer` folder into the game's
 folder in the library; the recipe names the file it checks for.
 
-The two changes are published under xrizer's own licence, GPL-3.0.
+The changes are published under xrizer's own licence, GPL-3.0.

@@ -106,7 +106,7 @@ recipes in [`recipes/`](recipes) are:
 | Demeo | Meta Store | about 4.3 GB; its mixed-reality mode works – your room shows around the board; it cannot sign in to its maker's account service (that needs Meta's own sign-in proof) and plays with a local player, whose name you set in the start window; playing online with others has not been tried |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |
-| Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German |
+| Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German; from toolchain 379 the eyes of characters no longer flash in solid colours |
 
 These twenty-one are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
 Quest title from the Meta Store – some 17,000, loaded page by page as you scroll. What you see on each is a label:
@@ -185,7 +185,10 @@ their own recipe.
   another version with it; songs that are newer than the tested version are not fetched until the project has
   tested a version that has them.
 - **Apple signing** uses the team you are signed in with in Xcode. The app reads the list of teams from Xcode's
-  settings and nothing else.
+  settings and nothing else. One thing it may add to your Mac: if your signing certificate is there but Apple's
+  intermediate certificate that issued it is not (a key that came from a backup or another Mac), nothing can be
+  signed. The app then fetches that one certificate from apple.com, checks with macOS that it issued yours and
+  leads to Apple's root, and adds it to your login keychain.
 - **The project's own service** (`avpplay.martek.de`) holds the list of further games and what users report about
   them. The app sends it what you search for and the identifiers of games whose page you open; a report you
   choose to send says which game and build, and whether it works. It never receives your Meta sign-in or
@@ -256,6 +259,14 @@ What this project took over from Glovebox, each named in the source where it liv
 - **A frame is handed over when the graphics chip has finished it**, rather than the game waiting for that.
 - **Free Apple accounts.** That a free account is enough for a game this large – Apple grants it the extra
   memory – is something Glovebox showed.
+- **The eyes of characters no longer flash in solid colours** (toolchain 379). Glovebox found why: the game's eye
+  shader reads past the end of a table, which a PC graphics card answers with zeros and Apple's with whatever lies
+  there. Its rewrite of that shader is used here, widened from the one variant it names to the six the game has.
+- **Smaller things** (toolchain 379): the game's files stay out of the headset's backup, where they would
+  otherwise take their full size – for every game, not only this one; the game's video settings survive a
+  visionOS update; the log of the run before the last is kept; a left-handed player's "Weapon Hand" setting moves
+  the controls to the other controller (this one also needs the next build of xrizer); and the Mac app fetches a
+  missing Apple intermediate certificate, described under Apple signing above.
 
 These changes are in the toolchain's source and come to the app with its next toolchain release.
 
