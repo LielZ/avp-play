@@ -219,6 +219,10 @@ extended for the games above. The toolchain package that ships with the app cont
 source together with prebuilt ANGLE and MoltenVK libraries and their licence texts; see
 [THIRD-PARTY.md](THIRD-PARTY.md).
 
+The fork is also a repository: [myMartek/Klepton](https://github.com/myMartek/Klepton), branch `avp-play`, with one
+commit per toolchain that shipped with a release (tagged `toolchain-N`). Changes to the runtime are welcome there
+as pull requests.
+
 ## Thanks to Glovebox
 
 [Glovebox](https://github.com/glovebox-vr/glovebox) brings Half-Life: Alyx to the Apple Vision Pro on its own, and

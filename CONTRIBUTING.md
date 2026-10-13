@@ -36,8 +36,10 @@ than to Meta (for the user's own downloads) and GitHub (for the update check).
 
 A game needs two things: a recipe ([format](docs/recipes.md)) and a *target* in the toolchain that makes the
 game actually run. The second part is the real work. The toolchain is a fork of
-[Klepton](https://github.com/shinyquagsire23/Klepton); its complete source is inside the toolchain package
-attached to every release (`klepton-toolchain-*.tar.gz`), with its own `BUILDING.md`.
+[Klepton](https://github.com/shinyquagsire23/Klepton), published at
+[myMartek/Klepton](https://github.com/myMartek/Klepton) (branch `avp-play`, one commit per released toolchain); the
+same source is inside the toolchain package attached to every release (`klepton-toolchain-*.tar.gz`), with its
+own `BUILDING.md`. A change to the runtime goes there as a pull request against `avp-play`.
 
 If you got a game running with Klepton and want it in AVP Play, open an issue first and describe the game, the
 build you used and what you had to change. Recipes for builds nobody has seen running are not merged.
