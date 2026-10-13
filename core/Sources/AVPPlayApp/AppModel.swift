@@ -250,6 +250,12 @@ final class AppModel: ObservableObject {
     @AppStorage("filterInstalled") var filterInstalled = false
     /// Nur Spiele, deren Dateien vollständig auf dem Mac liegen, die aber nicht auf der Vision Pro sind.
     @AppStorage("filterDownloaded") var filterDownloaded = false
+    /// Nur gemerkte Spiele, deren Dateien noch nicht vollständig auf dem Mac liegen: was von den Favoriten noch zu
+    /// laden ist. Das Gegenstück zu „Geladen, nicht installiert“ eine Stufe früher.
+    @AppStorage("filterFavouritesMissing") var filterFavouritesMissing = false
+    /// Ob ein Filter gesetzt ist, der die Favoriten braucht – dann sollen alle dastehen, auch die, bis zu denen der
+    /// Katalog noch nicht geladen ist.
+    var favouritesWanted: Bool { filterFavourites || filterFavouritesMissing }
     private var routed = false
     @AppStorage("teamId") var teamId = ""
     /// Die Sprache, in der das Programm gerade spricht. Ansichten hängen daran und bauen sich beim Wechsel neu.
@@ -427,6 +433,7 @@ final class AppModel: ObservableObject {
                 && (!filterInstalled || game.installed)
                 && (!filterDownloaded || (game.downloaded && !game.installed))
                 && (!filterFavourites || isFavourite(game))
+                && (!filterFavouritesMissing || (isFavourite(game) && !game.downloaded))
                 && (words.isEmpty || game.recipe.title.lowercased().contains(words) || game.recipe.package.lowercased().contains(words))
         }.sorted { a, b in
             // Geprüftes zuerst, dann schon Nachgeschlagenes, dann was Nutzer bestätigen, das Ungetestete, zuletzt

@@ -72,8 +72,10 @@ progress line of a job say which connection is in use.
 
 **Your list of games.** The games you have downloaded, the ones in your Meta account and your favourites can be
 written to a text file (*Data* › Export Game List, or the list the overview shows with *Installed*, *Downloaded,
-Not Installed* or *Favourites* set) – to pass on, for example to this project, so that it knows which games
-people have that do not run yet. It is only a list: no game files, nothing about your account or device.
+Not Installed*, *Favourites* or *Favourites Not Downloaded* set) – to pass on, for example to this project, so
+that it knows which games people have that do not run yet. It is only a list: no game files, nothing about your
+account or device. *Favourites Not Downloaded* is also the quick way to see what of your favourites is still to
+fetch to this Mac.
 
 **Updates.** Once a day the app asks GitHub whether a newer release exists and offers to install it. It replaces
 itself only with a version that is signed by the same developer and notarised by Apple. You can turn the check

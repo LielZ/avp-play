@@ -98,7 +98,7 @@ extension AppModel {
     /// nächste Seite des ganzen Katalogs. Mit einem Filter, der nur auf diesem Mac entschieden wird, nicht: was
     /// installiert oder gemerkt ist, steht schon vollständig da.
     var canLoadMore: Bool {
-        guard onlineCatalog, !filterInstalled, !filterFavourites, !filterDownloaded else { return false }
+        guard onlineCatalog, !filterInstalled, !favouritesWanted, !filterDownloaded else { return false }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.isEmpty else { return query == searchedQuery && searchMore }
         // Geprüftes und von Nutzern Bestätigtes steht im Katalog vorn. Ist einer dieser Filter gesetzt, lohnt

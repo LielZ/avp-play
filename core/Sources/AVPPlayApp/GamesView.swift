@@ -8,37 +8,61 @@ struct GamesView: View {
 
     private var shown: [Game] { model.shownGames }
 
+    /// Die Filter der Übersicht, als einzelne Ansichten: für eine Zeile oder zum Umbrechen.
+    @ViewBuilder private var filterToggles: some View {
+        Text(L("Show only:", "Nur zeigen:")).foregroundStyle(.secondary)
+        Toggle(L("Verified", "Geprüft"), isOn: $model.filterVerified)
+        if model.onlineCatalog { Toggle(L("Community Verified", "Von Nutzern bestätigt"), isOn: $model.filterCommunity) }
+        Toggle(L("Installed", "Installiert"), isOn: $model.filterInstalled)
+        Toggle(L("Downloaded, Not Installed", "Geladen, nicht installiert"), isOn: $model.filterDownloaded)
+            .help(L("Games whose files are completely on this Mac but which are not on the Vision Pro. While the Vision Pro is not reachable, every downloaded game is shown.",
+                    "Spiele, deren Dateien vollständig auf diesem Mac liegen, die aber nicht auf der Vision Pro sind. Solange die Vision Pro nicht erreichbar ist, stehen hier alle geladenen Spiele."))
+        Toggle(L("Favourites", "Favoriten"), isOn: $model.filterFavourites)
+        Toggle(L("Favourites Not Downloaded", "Nicht geladene Favoriten"), isOn: $model.filterFavouritesMissing)
+            .help(L("Favourites whose files are not completely on this Mac yet – what is still to download.",
+                    "Favoriten, deren Dateien noch nicht vollständig auf diesem Mac liegen – was noch zu laden ist."))
+    }
+
+    /// Was neben den Filtern steht: die Liste ausgeben, alles aktualisieren, und was gerade im Hintergrund läuft.
+    @ViewBuilder private var listActions: some View {
+        Button(L("Export List …", "Liste exportieren …")) { model.exportGameList(shownOnly: true) }
+            .controlSize(.small).disabled(!model.canExportShown)
+            .help(model.canExportShown
+                  ? L("Writes the games that match the filters and the search into a text file to pass on – all of them, also favourites the overview has not loaded yet. Only a list: no game files, nothing about your account or device.",
+                      "Schreibt die Spiele, die zu den Filtern und der Suche passen, in eine Textdatei zum Weitergeben – alle, auch Favoriten, die die Übersicht noch nicht geladen hat. Nur eine Liste: keine Spieldateien, nichts über dein Konto oder Gerät.")
+                  : L("Set “Installed”, “Downloaded, Not Installed”, “Favourites” or “Favourites Not Downloaded” first: only those are lists this Mac knows completely.",
+                      "Setze zuerst „Installiert“, „Geladen, nicht installiert“, „Favoriten“ oder „Nicht geladene Favoriten“: Nur das sind Listen, die dieser Mac vollständig kennt."))
+        if model.searching {
+            ProgressView().controlSize(.small)
+            Text(L("Searching the catalogue …", "Katalog wird durchsucht …")).font(.callout).foregroundStyle(.secondary)
+        }
+        if model.updatable.count > 1 {
+            Button(L("Update All (\(model.updatable.count))", "Alle aktualisieren (\(model.updatable.count))")) { model.updateAll() }
+        }
+        if model.checkingOwnership {
+            ProgressView().controlSize(.small)
+            Text(L("Checking ownership …", "Besitz wird geprüft …")).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $model.gamePath) {
             ScrollView {
                 if model.loadProblem == nil, !model.games.isEmpty {
-                    HStack {
-                        Text(L("Show only:", "Nur zeigen:")).foregroundStyle(.secondary)
-                        Toggle(L("Verified", "Geprüft"), isOn: $model.filterVerified)
-                        if model.onlineCatalog { Toggle(L("Community Verified", "Von Nutzern bestätigt"), isOn: $model.filterCommunity) }
-                        Toggle(L("Installed", "Installiert"), isOn: $model.filterInstalled)
-                        Toggle(L("Downloaded, Not Installed", "Geladen, nicht installiert"), isOn: $model.filterDownloaded)
-                            .help(L("Games whose files are completely on this Mac but which are not on the Vision Pro. While the Vision Pro is not reachable, every downloaded game is shown.",
-                                    "Spiele, deren Dateien vollständig auf diesem Mac liegen, die aber nicht auf der Vision Pro sind. Solange die Vision Pro nicht erreichbar ist, stehen hier alle geladenen Spiele."))
-                        Toggle(L("Favourites", "Favoriten"), isOn: $model.filterFavourites)
-                        Spacer()
-                        Button(L("Export List …", "Liste exportieren …")) { model.exportGameList(shownOnly: true) }
-                            .controlSize(.small).disabled(!model.canExportShown)
-                            .help(model.canExportShown
-                                  ? L("Writes the games that match the filters and the search into a text file to pass on – all of them, also favourites the overview has not loaded yet. Only a list: no game files, nothing about your account or device.",
-                                      "Schreibt die Spiele, die zu den Filtern und der Suche passen, in eine Textdatei zum Weitergeben – alle, auch Favoriten, die die Übersicht noch nicht geladen hat. Nur eine Liste: keine Spieldateien, nichts über dein Konto oder Gerät.")
-                                  : L("Set “Installed”, “Downloaded, Not Installed” or “Favourites” first: only those are lists this Mac knows completely.",
-                                      "Setze zuerst „Installiert“, „Geladen, nicht installiert“ oder „Favoriten“: Nur das sind Listen, die dieser Mac vollständig kennt."))
-                        if model.searching {
-                            ProgressView().controlSize(.small)
-                            Text(L("Searching the catalogue …", "Katalog wird durchsucht …")).font(.callout).foregroundStyle(.secondary)
+                    // In einer Zeile, solange das Fenster breit genug ist; sonst brechen die Schalter um wie Wörter und
+                    // die Knöpfe stehen darunter. Sechs Schalter mit deutschen Namen sind breiter als ein schmales Fenster.
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            filterToggles
+                            Spacer()
+                            listActions
                         }
-                        if model.updatable.count > 1 {
-                            Button(L("Update All (\(model.updatable.count))", "Alle aktualisieren (\(model.updatable.count))")) { model.updateAll() }
-                        }
-                        if model.checkingOwnership {
-                            ProgressView().controlSize(.small)
-                            Text(L("Checking ownership …", "Besitz wird geprüft …")).font(.callout).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 10) {
+                            FlowLayout(spacing: 10, lineSpacing: 8) { filterToggles }
+                            HStack {
+                                listActions
+                                Spacer()
+                            }
                         }
                     }
                     .padding(.horizontal, 22).padding(.top, 18)
@@ -83,8 +107,8 @@ struct GamesView: View {
                 try? await Task.sleep(for: .milliseconds(800))
                 if !Task.isCancelled { model.searchCatalog() }
             }
-            // Unter dem Filter „Favoriten“ sollen alle stehen, auch die, bis zu denen der Katalog noch nicht geladen ist.
-            .task(id: model.filterFavourites) { if model.filterFavourites { await model.loadAllFavourites() } }
+            // Unter einem Filter über die Favoriten sollen alle stehen, auch die, bis zu denen der Katalog noch nicht geladen ist.
+            .task(id: model.favouritesWanted) { if model.favouritesWanted { await model.loadAllFavourites() } }
             .navigationDestination(for: String.self) { id in
                 if let game = model.allGames.first(where: { $0.id == id }) { GameDetail(game: game) }
             }
@@ -232,6 +256,50 @@ struct TrustBadge: View {
             .foregroundStyle(.white)
             .background(color.opacity(0.92), in: Capsule())
             .help(help)
+    }
+}
+
+/// Reiht seine Kinder wie Wörter in einem Absatz: Was in der Zeile keinen Platz mehr hat, beginnt eine neue.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 6
+
+    private func rows(_ subviews: Subviews, width: CGFloat) -> [(items: [(index: Int, size: CGSize)], height: CGFloat)] {
+        var rows: [(items: [(index: Int, size: CGSize)], height: CGFloat)] = [([], 0)]
+        var x: CGFloat = 0
+        for (i, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].items.isEmpty, x + size.width > width {
+                rows.append(([], 0))
+                x = 0
+            }
+            rows[rows.count - 1].items.append((i, size))
+            rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+            x += size.width + spacing
+        }
+        return rows
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let rows = rows(subviews, width: width)
+        let widest = rows.map { $0.items.reduce(0) { $0 + $1.size.width } + spacing * CGFloat(max(0, $0.items.count - 1)) }.max() ?? 0
+        let height = rows.reduce(0) { $0 + $1.height } + lineSpacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: proposal.width.map { min($0, max(widest, 0)) } ?? widest, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for item in row.items {
+                // In der Zeile mittig, damit ein Schalter und ein Text auf einer Linie stehen.
+                subviews[item.index].place(at: CGPoint(x: x, y: y + (row.height - item.size.height) / 2),
+                                           proposal: ProposedViewSize(item.size))
+                x += item.size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
     }
 }
 

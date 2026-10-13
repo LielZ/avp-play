@@ -105,6 +105,7 @@ extension AppModel {
         if filterInstalled { parts.append(L("installed", "installiert")) }
         if filterDownloaded { parts.append(L("downloaded, not installed", "geladen, nicht installiert")) }
         if filterFavourites { parts.append(L("favourites", "Favoriten")) }
+        if filterFavouritesMissing { parts.append(L("favourites not downloaded", "nicht geladene Favoriten")) }
         let words = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !words.isEmpty { parts.append(L("search “\(words)”", "Suche „\(words)“")) }
         return parts.isEmpty ? L("All games the app has loaded", "Alle Spiele, die die App geladen hat")
@@ -126,7 +127,7 @@ extension AppModel {
         Task {
             let unloaded = await loadAllFavourites()
             writeGameList(shownOnly: shownOnly)
-            if unloaded > 0, !shownOnly || filterFavourites {
+            if unloaded > 0, !shownOnly || favouritesWanted {
                 notice = unloaded == 1
                     ? L("One favourite could not be loaded from the catalogue and is missing from the list or stands there by its number only.",
                         "Ein Favorit ließ sich nicht aus dem Katalog laden und fehlt in der Liste oder steht dort nur mit seiner Kennung.")
@@ -139,7 +140,7 @@ extension AppModel {
     /// Ob die Übersicht gerade etwas zeigt, das sich als vollständige Liste ausgeben lässt: Was installiert, geladen
     /// oder gemerkt ist, kennt dieser Mac ganz. Ohne einen dieser Filter zeigt die Übersicht nur den Teil des
     /// Katalogs, der schon geladen ist – das wäre keine Liste, sondern ein Ausschnitt.
-    var canExportShown: Bool { filterInstalled || filterDownloaded || filterFavourites }
+    var canExportShown: Bool { filterInstalled || filterDownloaded || favouritesWanted }
 
     private func writeGameList(shownOnly: Bool) {
         let panel = NSSavePanel()
