@@ -113,10 +113,10 @@
    "role": "xrizer",
    "source": {
     "kind": "url",
-    "url": "https://github.com/myMartek/avp-play/releases/download/xrizer-0989a7f-avpplay1/xrizer-0989a7f-avpplay1-linuxarm64.tar.gz",
+    "url": "https://github.com/myMartek/avp-play/releases/download/xrizer-0989a7f-avpplay2/xrizer-0989a7f-avpplay2-linuxarm64.tar.gz",
     "archive": {
-     "sha256": "d3812f16e86d4c802d510fedc4974293a89678124e7802066679ec29c248ad12",
-     "size": 4735875,
+     "sha256": "73a0b239d5720b4ded67bee5f6fcac5bfeb7a20b748b5012225ff42b64395c34",
+     "size": 4735623,
      "folder": "xrizer"
     },
     "hint": {
@@ -127,8 +127,8 @@
    "markers": [
     {
      "path": "bin/linuxarm64/vrclient.so",
-     "size": 16073672,
-     "sha256": "fa088c45bede27fa3ac8c8c2c578cfe4fa6becec5cc2365cb551c37da180aafc"
+     "size": 16070880,
+     "sha256": "d8e4855f5d77f86224f0699a3f1db3be177204efce02ea648218f93dca143ca5"
     }
    ]
   }

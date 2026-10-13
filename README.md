@@ -265,7 +265,7 @@ What this project took over from Glovebox, each named in the source where it liv
 - **Smaller things** (toolchain 379): the game's files stay out of the headset's backup, where they would
   otherwise take their full size – for every game, not only this one; the game's video settings survive a
   visionOS update; the log of the run before the last is kept; a left-handed player's "Weapon Hand" setting moves
-  the controls to the other controller (this one also needs the next build of xrizer); and the Mac app fetches a
+  the controls to the other controller (with the xrizer build the recipe downloads from then on); and the Mac app fetches a
   missing Apple intermediate certificate, described under Apple signing above.
 
 These changes are in the toolchain's source and come to the app with its next toolchain release.
