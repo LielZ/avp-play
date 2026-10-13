@@ -86,7 +86,7 @@ recipes in [`recipes/`](recipes) are:
 
 | Game | Source | Notes |
 |---|---|---|
-| Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick |
+| Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick; the first start compiles shaders for several minutes, on the game's own screen |
 | Batman: Arkham Shadow | Meta Store | optional voice languages |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
 | Moss | Meta Store | |
