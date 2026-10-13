@@ -255,9 +255,14 @@ extension AppModel {
                 try encoder.encode(recipe).write(to: drafts.appendingPathComponent("\(recipe.id).json"), options: .atomic)
                 // Das Titelbild von der Store-Seite, wie bei den geprüften Spielen: einmal holen, danach liegt es im Bestand.
                 let cover = StartHero.storeURL(store: paths.store, recipe: recipe)
-                if !FileManager.default.fileExists(atPath: cover.path), let image = await StoreArt().landscapeCover(appId: entry.appId) {
-                    try? FileManager.default.createDirectory(at: cover.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try? image.write(to: cover, options: .atomic)
+                // Zeigt die Store-Seite keins und nennt der Katalog eins, kommt es von dort.
+                if !FileManager.default.fileExists(atPath: cover.path) {
+                    var image = await StoreArt().landscapeCover(appId: entry.appId)
+                    if image == nil, detail.cover == true { image = await client.cover(appId: entry.appId) }
+                    if let image {
+                        try? FileManager.default.createDirectory(at: cover.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try? image.write(to: cover, options: .atomic)
+                    }
                 }
             } catch let stop as Stop {
                 note = stop.text

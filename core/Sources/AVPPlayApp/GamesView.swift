@@ -411,7 +411,7 @@ struct CoverImage: View {
             .task(id: game.id) {
                 fetched = nil
                 guard game.cover == nil, model.storePictures, let appId = game.recipe.catalogAppId,
-                      let data = await model.covers.image(appId: appId), !Task.isCancelled else { return }
+                      let data = await model.covers.image(appId: appId, catalogHasOne: game.catalog?.cover == true), !Task.isCancelled else { return }
                 fetched = NSImage(data: data)
             }
     }

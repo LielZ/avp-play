@@ -176,7 +176,9 @@ their own recipe.
 - **Pictures** of games whose files are not on your Mac yet come from the game's public page in the Meta Store
   (meta.com): only for games you are looking at, two at a time, without your Meta sign-in or cookies. A small
   copy is kept in a cache (`~/Library/Caches/AVPPlay`) that the *Data* page can empty; Settings › Pictures turns
-  this off. Games whose store page names no picture keep a coloured tile with their name.
+  this off. A few store pages show no picture to a visitor who is not signed in (Richie's Plank Experience);
+  for such a game the picture comes from the project's catalogue service, which is asked only when the catalogue
+  names one. Other games without a picture keep a coloured tile with their name.
 - **Ownership** is asked of Meta before anything is downloaded, and once a day so the app can show which games
   are yours. A game that counted as not owned is asked about again within the hour, and **Check Purchase** on a
   game's page asks right away. Add-on content is downloaded only for purchases Meta confirms. Bought

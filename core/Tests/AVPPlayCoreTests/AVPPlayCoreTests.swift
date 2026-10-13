@@ -1181,6 +1181,52 @@ final class CoverTests: XCTestCase {
         let notAnId = await second.image(appId: "alyx")
         XCTAssertNil(notAnId)
     }
+
+    /// Richie's Plank Experience: die Store-Seite zeigt öffentlich kein Bild, der Katalog nennt eins.
+    func testLoaderTakesThePictureFromTheCatalogueWhenTheStorePageHasNone() async throws {
+        let cache = CoverCache(directory: folder())
+        let original = picture(width: 1280, height: 720)
+        let store = LockedBox<[String]>([]), catalogue = LockedBox<[String]>([])
+        let loader = CoverLoader(cache: cache, fromCatalog: { id in
+            catalogue.set(catalogue.get() + [id])
+            return id == "1642239225880682" ? original : nil
+        }, fetch: { id in
+            store.set(store.get() + [id])
+            return id == "3634830803298285" ? original : nil
+        })
+        // Ohne Hinweis des Katalogs wird der Dienst nicht gefragt.
+        let unnamed = await loader.image(appId: "1642239225880682")
+        XCTAssertNil(unnamed)
+        XCTAssertEqual(catalogue.get(), [])
+        XCTAssertTrue(cache.isKnownMissing(appId: "1642239225880682"))
+        // Mit Hinweis kommt es von dort – obwohl schon vermerkt ist, dass die Store-Seite nichts hat, und ohne sie neu zu fragen.
+        let named = await loader.image(appId: "1642239225880682", catalogHasOne: true)
+        XCTAssertNotNil(named)
+        XCTAssertEqual(store.get(), ["1642239225880682"])
+        XCTAssertEqual(catalogue.get(), ["1642239225880682"])
+        XCTAssertFalse(cache.isKnownMissing(appId: "1642239225880682"))
+        XCTAssertEqual(cache.cached(appId: "1642239225880682"), named)
+        // Hat die Store-Seite ein Bild, bleibt es bei dem.
+        let fromStore = await loader.image(appId: "3634830803298285", catalogHasOne: true)
+        XCTAssertNotNil(fromStore)
+        XCTAssertEqual(catalogue.get(), ["1642239225880682"])
+        // Liefert der Dienst nichts, wird in dieser Sitzung nicht bei jedem Erscheinen der Karte neu gefragt.
+        let none = await loader.image(appId: "777777", catalogHasOne: true)
+        let noneAgain = await loader.image(appId: "777777", catalogHasOne: true)
+        XCTAssertNil(none)
+        XCTAssertNil(noneAgain)
+        XCTAssertEqual(catalogue.get().filter { $0 == "777777" }.count, 1)
+        XCTAssertEqual(store.get().filter { $0 == "777777" }.count, 1)
+    }
+
+    func testCatalogueEntryNamesItsPicture() throws {
+        let json = #"{"appId":"1642239225880682","title":"Richie's Plank Experience","package":"com.ToastVR.RichiesPlankExperience","status":"community","cover":true,"works":0,"problems":0,"fails":0}"#
+        let game = try JSONDecoder().decode(CatalogGame.self, from: Data(json.utf8))
+        XCTAssertEqual(game.cover, true)
+        XCTAssertTrue(game.isSane)
+        let plain = try JSONDecoder().decode(CatalogGame.self, from: Data(json.replacingOccurrences(of: #""cover":true,"#, with: "").utf8))
+        XCTAssertNil(plain.cover)
+    }
 }
 
 final class RosettaTests: XCTestCase {

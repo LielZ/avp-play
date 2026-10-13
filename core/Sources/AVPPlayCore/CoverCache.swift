@@ -94,10 +94,15 @@ public struct CoverCache: Sendable {
 
 /// Besorgt Titelbilder für die Liste: erst aus dem Speicher, dann aus dem Zwischenspeicher auf der Platte, zuletzt
 /// von der Store-Seite – dort höchstens zwei Abrufe zugleich, der zuletzt gefragte zuerst (wer scrollt, will das
-/// sehen, was gerade vor ihm liegt), und nie zweimal für dasselbe Spiel.
+/// sehen, was gerade vor ihm liegt), und nie zweimal für dasselbe Spiel. Zeigt die Store-Seite kein Bild und nennt
+/// der Katalog eins, kommt es vom Katalogdienst.
 public actor CoverLoader {
     private let cache: CoverCache
     private let fetch: @Sendable (String) async -> Data?
+    private let fromCatalog: @Sendable (String) async -> Data?
+    /// Spiele, bei denen der Katalogdienst in dieser Sitzung nichts geliefert hat – damit eine Karte ohne Netz
+    /// nicht bei jedem Erscheinen neu fragt.
+    private var catalogFailed: Set<String> = []
     private var memory: [String: Data] = [:]
     private var order: [String] = []
     private var running: [String: Task<Data?, Never>] = [:]
@@ -106,36 +111,43 @@ public actor CoverLoader {
     private let memoryLimit = 400
 
     public init(cache: CoverCache = CoverCache(), concurrent: Int = 2,
+                fromCatalog: @escaping @Sendable (String) async -> Data? = { await CatalogClient().cover(appId: $0) },
                 fetch: @escaping @Sendable (String) async -> Data? = { await StoreArt().landscapeCover(appId: $0) }) {
         self.cache = cache
         self.fetch = fetch
+        self.fromCatalog = fromCatalog
         self.free = max(1, concurrent)
     }
 
     /// Das Bild für ein Spiel aus dem Store, verkleinert. `nil`, wenn es keins gibt, das Netz fehlt oder die
-    /// Aufgabe abgebrochen wurde (die Karte ist aus dem Bild gescrollt).
-    public func image(appId: String) async -> Data? {
+    /// Aufgabe abgebrochen wurde (die Karte ist aus dem Bild gescrollt). `catalogHasOne`: der Katalog nennt ein
+    /// eigenes Bild für dieses Spiel; es wird geholt, wenn die Store-Seite keins hergibt – auch dann, wenn das
+    /// schon früher festgestellt wurde.
+    public func image(appId: String, catalogHasOne: Bool = false) async -> Data? {
         guard CoverCache.isAppId(appId) else { return nil }
         if let hit = memory[appId] { return hit }
         if let task = running[appId] { return await task.value }
         if let disk = cache.cached(appId: appId) { remember(appId, disk); return disk }
-        if cache.isKnownMissing(appId: appId) { return nil }
+        let askCatalog = catalogHasOne && !catalogFailed.contains(appId)
+        let storeHasNone = cache.isKnownMissing(appId: appId)
+        if storeHasNone && !askCatalog { return nil }
 
         await acquire()
         // Wer lange gewartet hat, ist vielleicht nicht mehr gefragt – oder ein anderer hat es inzwischen geholt.
         if Task.isCancelled { release(); return nil }
         if let hit = memory[appId] { release(); return hit }
         if let task = running[appId] { release(); return await task.value }
-        let cache = cache, fetch = fetch
+        let cache = cache, fetch = fetch, fromCatalog = fromCatalog
         let task = Task<Data?, Never> {
-            guard let original = await fetch(appId) else { cache.noteMissing(appId: appId); return nil }
-            guard let small = cache.store(appId: appId, original: original) else { cache.noteMissing(appId: appId); return nil }
-            return small
+            if !storeHasNone, let original = await fetch(appId), let small = cache.store(appId: appId, original: original) { return small }
+            if askCatalog, let original = await fromCatalog(appId), let small = cache.store(appId: appId, original: original) { return small }
+            cache.noteMissing(appId: appId)
+            return nil
         }
         running[appId] = task
         let result = await task.value
         running[appId] = nil
-        if let result { remember(appId, result) }
+        if let result { remember(appId, result) } else if askCatalog { catalogFailed.insert(appId) }
         release()
         return result
     }

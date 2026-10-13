@@ -3,6 +3,7 @@ import Foundation
 /// Ein Spiel aus dem Online-Katalog: ein Titel aus dem Meta-Store, was über seinen neuesten Build bekannt ist und
 /// was das Projekt und andere Nutzer dazu sagen. Der Katalog liefert nur Namen und Kennungen – nie Spielinhalte,
 /// nie eine Adresse, von der geladen würde. Geladen wird ausschließlich bei Meta, mit dem Konto des Nutzers.
+/// Einzige Ausnahme ist ein Titelbild für die wenigen Spiele, deren Store-Seite öffentlich keins zeigt (`cover`).
 public struct CatalogGame: Codable, Sendable, Identifiable, Equatable {
     public var appId: String
     public var title: String
@@ -20,6 +21,9 @@ public struct CatalogGame: Codable, Sendable, Identifiable, Equatable {
     public var target: String?
     /// Das Spiel hat einen Mixed-Reality-Modus, der mit AVP Play funktioniert.
     public var mixedReality: Bool?
+    /// Der Dienst hält ein Titelbild für dieses Spiel bereit, weil die Store-Seite des Spiels öffentlich keins zeigt
+    /// (Richie's Plank Experience). Nur dann fragt die App dort nach einem – und erst nach der Store-Seite.
+    public var cover: Bool?
     /// Meldungen von Nutzern; jede zählt, sobald sie eingeht.
     public var works: Int
     public var problems: Int
@@ -227,6 +231,21 @@ public struct CatalogClient: Sendable {
             throw CatalogError.unexpected
         }
         return game
+    }
+
+    /// Größer ist kein Titelbild des Dienstes; was mehr liefert, wird nicht angenommen.
+    static let maxCoverBytes = 1_000_000
+
+    /// Das Titelbild, das der Dienst für ein Spiel bereithält (`CatalogGame.cover`). `nil`, wenn er keins hat, nicht
+    /// erreichbar ist oder etwas anderes als ein Bild in dieser Größe schickt.
+    public func cover(appId: String) async -> Data? {
+        guard CatalogGame.isIdentifier(appId) else { return nil }
+        var r = request("api/v1/covers/\(appId)")
+        r.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await session.data(for: r), let http = response as? HTTPURLResponse, http.statusCode == 200,
+              http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("image/") == true,
+              data.count <= CatalogClient.maxCoverBytes, StoreArt.pixelSize(data) != nil else { return nil }
+        return data
     }
 
     private func post<Body: Encodable>(_ path: String, _ body: Body) async throws {
