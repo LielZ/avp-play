@@ -9,7 +9,8 @@ public struct GameStatus: Sendable, Equatable {
         case notInstalled
         /// Von diesem Werkzeug mit der jetzigen Toolchain (oder einer neueren) gebaut.
         case current(stamp: String)
-        /// Von diesem Werkzeug gebaut, aber mit einer älteren Toolchain als der jetzt installierten.
+        /// Von diesem Werkzeug gebaut, aber mit einer älteren Toolchain als der jetzt installierten – oder, wo für
+        /// das Spiel eine Toolchain gewählt ist, mit einer anderen als der gewählten.
         case olderToolchain(stamp: String)
         /// Von diesem Werkzeug gebaut, aber aus einer älteren Fassung des SPIELS als der des Rezepts – das Rezept
         /// wurde inzwischen für eine neuere geprüft, oder der Nutzer hat die neueste aus dem Store gewählt.
@@ -35,16 +36,20 @@ public struct GameStatus: Sendable, Equatable {
     /// Fehlende Pflichtdateien und Ordner, die der Nutzer selbst bereitstellen muss, mit dem Hinweis des Rezepts.
     public var userProvidedMissing: [String]
     public var onDevice: OnDevice
+    /// Womit die installierte App gebaut wurde, soweit ihr Stempel von diesem Werkzeug stammt.
+    public var builtWith: AppStamp.Built?
 
     public var stockComplete: Bool { filesPresent == filesRequired && treesPresent == treesRequired }
 
     /// - Parameter toolchainVersion: ab welcher Toolchain-Nummer ein gebautes Spiel als aktuell gilt
     ///   (`Toolchain.appRevision()`), nicht zwingend die Nummer der installierten Toolchain.
+    /// - Parameter pin: der Stand, der für dieses Spiel gewählt ist (`ToolchainChoices`). Dann ist aktuell, was
+    ///   genau mit ihm gebaut wurde, und alles andere – auch ein Bau mit einer neueren – ist es nicht.
     /// - Parameter bundlePrefix: das Präfix, unter dem die Spiele installiert werden; ohne Angabe das übliche.
     /// - Parameter otherSourceBuilds: die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle
     ///   installiert wäre.
     public static func of(recipe r: Recipe, store: ContentStore, apps: [InstalledApp]?, toolchainVersion: Int?,
-                          bundlePrefix: String? = nil, otherSourceBuilds: Set<Int> = []) -> GameStatus {
+                          pin: ToolchainChoices.Pin? = nil, bundlePrefix: String? = nil, otherSourceBuilds: Set<Int> = []) -> GameStatus {
         // Was Meta diesem Konto nicht ausliefert (ein nicht gekaufter Zusatzinhalt, siehe `ContentStore.Withheld`),
         // fehlt nicht: Es wird nie geladen und steht dem Spiel nicht im Weg. Ohne das stünde bei einem Spiel wie
         // Maestro für immer „3 von 11 Dateien“, obwohl alles da ist, was dem Konto zusteht.
@@ -63,19 +68,22 @@ public struct GameStatus: Sendable, Equatable {
         byUser += treesMissing.filter { $0.source.kind == .user }.map { t in t.source.hint.map { "\(t.name) – \($0)" } ?? t.name }
 
         var onDevice = OnDevice.unknown
+        var builtWith: AppStamp.Built?
         if let apps {
             let bundle = Toolchain.bundleId(target: r.toolchain.target, prefix: bundlePrefix)
             if let app = apps.first(where: { $0.bundleIdentifier == bundle }) {
                 let stamp = "\(app.version ?? "?") (\(app.bundleVersion ?? "?"))"
+                let built = app.bundleVersion.flatMap(AppStamp.parse)
                 if app.version == AppStamp.short(versionName: r.versionName), let b = app.bundleVersion,
                    b.hasPrefix("\(r.versionCode).") {
-                    let built = Int(b.split(separator: ".").last ?? "") ?? 0
-                    onDevice = (toolchainVersion.map { built < $0 } ?? false) ? .olderToolchain(stamp: stamp) : .current(stamp: stamp)
-                } else if let b = app.bundleVersion, let installed = Int(b.split(separator: ".").first ?? ""),
-                          b.split(separator: ".").count == 2, otherSourceBuilds.contains(installed) {
+                    builtWith = built
+                    let number = built?.toolchain ?? 0
+                    let outdated = pin.map { number != $0.version || built?.modified != $0.modified } ?? toolchainVersion.map { number < $0 } ?? false
+                    onDevice = outdated ? .olderToolchain(stamp: stamp) : .current(stamp: stamp)
+                } else if let installed = built?.versionCode, otherSourceBuilds.contains(installed) {
                     onDevice = .otherSource(stamp: stamp)
-                } else if let b = app.bundleVersion, let installed = Int(b.split(separator: ".").first ?? ""),
-                          b.split(separator: ".").count == 2, installed > 0, installed < r.versionCode {
+                } else if let installed = built?.versionCode, installed > 0, installed < r.versionCode {
+                    builtWith = built
                     // Der Stempel dieses Werkzeugs ist „<Versionscode>.<Toolchain>“: Eine kleinere erste Zahl ist
                     // dasselbe Spiel in einer älteren Fassung.
                     onDevice = .olderGame(stamp: stamp)
@@ -91,6 +99,6 @@ public struct GameStatus: Sendable, Equatable {
                           bytesToDownload: missing.filter { !ownToProvide($0) }.reduce(0) { $0 + ($1.size ?? 0) }
                               + treesMissing.filter { $0.source.kind == .url }.reduce(0) { $0 + ($1.source.archive?.size ?? 0) },
                           filesToDownload: missing.filter { !ownToProvide($0) }.count + treesMissing.filter { $0.source.kind == .url }.count,
-                          userProvidedMissing: byUser, onDevice: onDevice)
+                          userProvidedMissing: byUser, onDevice: onDevice, builtWith: builtWith)
     }
 }

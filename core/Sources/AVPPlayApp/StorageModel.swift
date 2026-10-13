@@ -72,6 +72,7 @@ extension AppModel {
         let paths = paths
         let known = games.map { (id: $0.id, folder: "\($0.recipe.id)-\($0.recipe.versionCode)", recipe: $0.recipe.id, title: $0.recipe.title, version: $0.recipe.versionName) }
         let unfinished = Set(jobs.filter { $0.state != .finished && $0.state != .cancelled }.map(\.toolchainCommit))
+            .union(keptToolchainCommits)
         Task.detached {
             let fm = FileManager.default
             let root = paths.store.root
@@ -140,11 +141,12 @@ extension AppModel {
         }
     }
 
-    /// Entfernt die Toolchains, die keiner mehr braucht: alle bis auf die neueste und die, mit denen ein noch
-    /// nicht abgeschlossener Auftrag begonnen wurde.
+    /// Entfernt die Toolchains, die keiner mehr braucht: alle bis auf die neueste, die, mit denen ein noch
+    /// nicht abgeschlossener Auftrag begonnen wurde, und die, die für ein Spiel gewählt sind.
     func removeOlderToolchains() {
         let paths = paths
         let unfinished = Set(jobs.filter { $0.state != .finished && $0.state != .cancelled }.map(\.toolchainCommit))
+            .union(keptToolchainCommits)
         Task.detached {
             let removed = (try? paths.packager.prune(keep: 1, protecting: unfinished)) ?? []
             await MainActor.run {

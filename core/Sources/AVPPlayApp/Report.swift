@@ -24,6 +24,11 @@ extension AppModel {
         }
         lines.append("Meta account: \(accountText); sign-in tool \(toolPresent ? "set up" : "not set up")")
         lines.append("Toolchain: \(toolchainText ?? "not installed")")
+        // Wo ein Spiel nicht mit der neuesten gebaut wird – ohne Pfade, die nennen den Benutzerordner.
+        if !toolchainChoices.games.isEmpty {
+            lines.append("Toolchain chosen per game: " + toolchainChoices.games.sorted { $0.key < $1.key }
+                .map { "\($0.key) \($0.value.version)\($0.value.modified ? " (modified)" : "")" }.joined(separator: ", "))
+        }
         lines.append("Games on the device: " + games.map { g -> String in
             let state: String
             switch g.status.onDevice {

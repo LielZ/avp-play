@@ -265,6 +265,13 @@ enum Snapshot {
             model.searchCatalog()
             await pause(3)
         }
+        // `--released-toolchains`: die Liste älterer Toolchains von GitHub holen, wie es der Knopf auf der Seite
+        // eines Spiels täte (dort ist die Wahl der Toolchain für die Bilder aufgeklappt).
+        if CommandLine.arguments.contains("--released-toolchains") {
+            model.loadReleasedToolchains()
+            var waited = 0.0
+            while model.releasedToolchainsLoading, waited < 30 { await pause(0.5); waited += 0.5 }
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--open-game"), i + 1 < CommandLine.arguments.count {
             let id = CommandLine.arguments[i + 1]
             var waited = 0.0

@@ -120,15 +120,50 @@ public enum Renewal {
         return candidates.first { bundle in apps.contains { $0.bundleIdentifier == bundle } }
     }
 
+    /// Womit ein Spiel erneuert wird: mit dem für es gewählten Stand, sonst mit der neuesten Toolchain. `nil` (mit
+    /// dem Grund an `skip`), wenn der gewählte Stand nicht mehr da ist, wenn die Toolchain für das Rezept zu alt
+    /// ist – oder wenn auf dem Gerät ein Bau aus einer bearbeiteten Arbeitskopie liegt, die für das Spiel nicht
+    /// gewählt ist: Den ersetzte das Erneuern sonst durch einen Bau ohne die Änderungen.
+    static func chosenToolchain(for recipe: Recipe, app: InstalledApp, newest: Toolchain, choices: ToolchainChoices,
+                                packager: ToolchainPackager, skip: (String) -> Void) -> Toolchain? {
+        let chosen: Toolchain
+        if let pin = choices.games[recipe.id] {
+            guard let kept = packager.toolchain(for: pin) else {
+                skip(L("toolchain \(pin.name), chosen for this game, is no longer on this Mac. Choose one on the game's page.",
+                       "Toolchain \(pin.name), für dieses Spiel gewählt, liegt nicht mehr auf diesem Mac. Wähle auf der Seite des Spiels eine."))
+                return nil
+            }
+            chosen = kept
+        } else {
+            if let built = app.bundleVersion.flatMap(AppStamp.parse), built.modified {
+                skip(L("was built with toolchain \(Toolchain.name(version: built.toolchain, modified: true)), which is not chosen for this game. It is not renewed, so that this build is not replaced; choose the toolchain on the game's page.",
+                       "wurde mit Toolchain \(Toolchain.name(version: built.toolchain, modified: true)) gebaut, die für dieses Spiel nicht gewählt ist. Es wird nicht erneuert, damit dieser Bau nicht ersetzt wird; wähle die Toolchain auf der Seite des Spiels."))
+                return nil
+            }
+            chosen = newest
+        }
+        guard chosen.satisfies(minCommit: recipe.toolchain.minCommit) else {
+            skip(choices.games[recipe.id] == nil
+                 ? L("needs a newer toolchain than the one installed.", "braucht eine neuere Toolchain als die installierte.")
+                 : L("needs a newer toolchain than the one chosen for it.", "braucht eine neuere Toolchain als die dafür gewählte."))
+            return nil
+        }
+        return chosen
+    }
+
     /// Ein Lauf: Wer fällig ist, wird neu signiert, sofern das Gerät erreichbar ist und nichts dagegen spricht.
     /// Ist nichts fällig, wird das Gerät gar nicht erst gefragt.
     /// - Parameters:
     ///   - toolchain: die installierte Toolchain; ohne sie wird nichts gebaut
+    ///   - choices: wo für ein Spiel eine andere Toolchain gewählt ist, wird mit der erneuert – das Erneuern soll
+    ///     einen Bau nicht gegen einen aus einem anderen Stand tauschen
+    ///   - packager: wo die installierten Pakete liegen, unter denen ein gewähltes gesucht wird
     ///   - preferredDevice: das in der App gewählte Headset, wenn mehrere erreichbar sind
     ///   - dryRun: nur feststellen, was fällig wäre und ob es ginge
     ///   - force: diese Rezepte gelten als fällig, gleich wie lange ihre Signatur noch gilt (zum Ausprobieren)
-    public static func run(recipes: [Recipe], store: ContentStore, toolchain: Toolchain?, preferredDevice: String? = nil,
-                           now: Date = Date(), dryRun: Bool = false, force: Set<String> = [],
+    public static func run(recipes: [Recipe], store: ContentStore, toolchain: Toolchain?,
+                           choices: ToolchainChoices = .load(), packager: ToolchainPackager = ToolchainPackager(root: ToolchainPackager.defaultRoot),
+                           preferredDevice: String? = nil, now: Date = Date(), dryRun: Bool = false, force: Set<String> = [],
                            log: @escaping @Sendable (String) -> Void = { _ in }) async -> RenewalReport {
         let installations = recipes.compactMap { r in SigningRecord.load(store: store, recipe: r).map { (recipe: r, record: $0) } }
         let due = installations.filter { force.contains($0.recipe.id) || isDue($0.record, now: now) }
@@ -174,10 +209,8 @@ public enum Renewal {
                 outcome(.skipped, L("is running right now; it is renewed at the next check.", "läuft gerade; erneuert wird bei der nächsten Prüfung."))
                 continue
             }
-            guard toolchain.satisfies(minCommit: recipe.toolchain.minCommit) else {
-                outcome(.skipped, L("needs a newer toolchain than the one installed.", "braucht eine neuere Toolchain als die installierte."))
-                continue
-            }
+            guard let toolchain = chosenToolchain(for: recipe, app: app, newest: toolchain, choices: choices, packager: packager,
+                                                  skip: { outcome(.skipped, $0) }) else { continue }
             guard !ProcessLock.isHeld(ProcessLock.installURL) else {
                 outcome(.skipped, L("another job is building right now; it is renewed at the next check.", "ein anderer Auftrag baut gerade; erneuert wird bei der nächsten Prüfung."))
                 continue

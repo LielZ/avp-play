@@ -34,7 +34,7 @@ extension AppModel {
     /// oder Apples Grenze von drei Apps je Gerät.
     func freeAccountBlocker(for game: Game) -> String? {
         guard usesFreeTeam else { return nil }
-        if let t = toolchain, !t.supportsFreeTeams {
+        if let t = toolchain(for: game), !t.supportsFreeTeams {
             return L("The installed toolchain cannot build for a free Apple account yet. Update AVP Play, or choose a paid team under “Setup”.",
                      "Die installierte Toolchain kann für ein kostenloses Apple-Konto noch nicht bauen. Aktualisiere AVP Play oder wähle unter „Einrichtung“ ein bezahltes Team.")
         }
@@ -343,7 +343,7 @@ extension AppModel {
         let wanted = chosenDevice.isEmpty ? nil : chosenDevice
         Task.detached {
             let report = await Renewal.run(recipes: Renewal.recipes(bundled: paths.recipes, drafts: drafts), store: paths.store,
-                                           toolchain: paths.toolchain(), preferredDevice: wanted)
+                                           toolchain: paths.toolchain(), packager: paths.packager, preferredDevice: wanted)
             report.save()
             await MainActor.run {
                 self.renewalReport = report
@@ -454,7 +454,7 @@ enum RenewalAgent {
         let done = DispatchSemaphore(value: 0)
         Task.detached {
             let report = await Renewal.run(recipes: Renewal.recipes(bundled: paths.recipes, drafts: drafts), store: paths.store,
-                                           toolchain: paths.toolchain(), preferredDevice: wanted,
+                                           toolchain: paths.toolchain(), packager: paths.packager, preferredDevice: wanted,
                                            log: { print("\(stamp()) \(Redaction.redact($0))") })
             report.save()
             print("\(stamp()) checked: \(report.known) known, \(report.outcomes.count) due, "

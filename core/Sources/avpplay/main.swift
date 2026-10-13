@@ -102,9 +102,15 @@ avpplay – command line for the AVP Play core library
   avpplay icon <id> --to <folder>              save the app icon from the APK as a visionOS icon (three layers)
   avpplay devices                              paired Vision Pro devices
   avpplay status                               per game: library on the Mac and state on the device
-  avpplay toolchains                           installed toolchain packages
+  avpplay toolchains [--released]              installed toolchain packages; with --released also the older ones that came
+                                               with releases of AVP Play on GitHub
+  avpplay toolchain get <number>               download one of those from GitHub, check it and install it next to the others
   avpplay toolchain pack --from <Fork> --to <folder>      build a package from a committed state of the fork
   avpplay toolchain install <archive>          check and install a package
+  avpplay toolchain mark <folder>              mark a working copy of a toolchain as modified; it is then listed as “(modified)”
+  avpplay toolchain use <id> --toolchain <folder> | --newest
+                                               build this game with that toolchain from now on (an installed package or a
+                                               working copy) – or with the newest one again
   avpplay install <id> --team <team ID>        build, install, copy missing data, unlock add-on content
   avpplay stage <id>                           only copy missing data and add-on content (no build)
   avpplay renew [--dry-run] [--force <id>]     sign installed games again whose signature runs out soon (what the background service does)
@@ -154,9 +160,16 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay icon <id> --to <Ordner>              App-Icon aus dem APK als visionOS-Icon (drei Ebenen) ablegen
   avpplay devices                              gekoppelte Vision-Pro-Geräte
   avpplay status                               je Spiel: Bestand auf dem Mac und Stand auf dem Gerät
-  avpplay toolchains                           installierte Toolchain-Pakete
+  avpplay toolchains [--released]              installierte Toolchain-Pakete; mit --released auch die älteren, die mit
+                                               Veröffentlichungen von AVP Play auf GitHub kamen
+  avpplay toolchain get <Nummer>               eines davon von GitHub laden, prüfen und neben den anderen installieren
   avpplay toolchain pack --from <Fork> --to <Ordner>      Paket aus einem eingecheckten Fork-Stand bauen
   avpplay toolchain install <Archiv>           Paket prüfen und installieren
+  avpplay toolchain mark <Ordner>              eine Arbeitskopie einer Toolchain als bearbeitet kennzeichnen; sie steht dann
+                                               mit „(modifiziert)“ in den Listen
+  avpplay toolchain use <id> --toolchain <Ordner> | --newest
+                                               dieses Spiel ab jetzt mit dieser Toolchain bauen (ein installiertes Paket oder
+                                               eine Arbeitskopie) – oder wieder mit der neuesten
   avpplay install <id> --team <Team-ID>        bauen, installieren, Daten ergänzend kopieren, Zusatzinhalte freischalten
   avpplay stage <id>                           nur Daten und Zusatzinhalte ergänzend kopieren (ohne Build)
   avpplay renew [--dry-run] [--force <id>]     installierte Spiele neu signieren, deren Signatur bald abläuft (was der Hintergrunddienst tut)
@@ -236,11 +249,23 @@ func jobStore(_ o: Options) -> JobStore {
              ?? JobStore.defaultDirectory)
 }
 
+/// Die Toolchain, die für ein Spiel gewählt ist (`avpplay toolchain use`, oder auf seiner Seite in der App).
+/// Liegt sie nicht mehr auf diesem Mac, wird nicht stillschweigend mit einer anderen gebaut.
+func chosenToolchain(_ o: Options, recipe id: String) -> String? {
+    guard let pin = ToolchainChoices.load().games[id] else { return nil }
+    guard let kept = toolchainPackager(o).toolchain(for: pin) else {
+        fail(L("Toolchain \(pin.name), chosen for this game, is no longer on this Mac. Name one with --toolchain <folder>, or go back to the newest with: avpplay toolchain use \(id) --newest",
+               "Toolchain \(pin.name), für dieses Spiel gewählt, liegt nicht mehr auf diesem Mac. Nenne eine mit --toolchain <Ordner>, oder kehre zur neuesten zurück mit: avpplay toolchain use \(id) --newest"))
+    }
+    return kept.root.path
+}
+
 /// Die Angaben der Kommandozeile als Auftrag an die Bibliothek.
-func installRequest(_ o: Options) -> InstallRequest {
-    // Reihenfolge: ausdrücklich genannt, dann das neueste installierte Paket, zuletzt das Arbeitsverzeichnis
-    // der Entwicklung neben den Rezepten.
+func installRequest(_ o: Options, recipe id: String? = nil) -> InstallRequest {
+    // Reihenfolge: ausdrücklich genannt, dann die für das Spiel gewählte, dann das neueste installierte Paket,
+    // zuletzt das Arbeitsverzeichnis der Entwicklung neben den Rezepten.
     let toolchain = o.value("toolchain") ?? ProcessInfo.processInfo.environment["AVPPLAY_TOOLCHAIN"]
+        ?? id.flatMap { chosenToolchain(o, recipe: $0) }
         ?? toolchainPackager(o).installed().first?.root.path
         ?? recipesDirectory(o).deletingLastPathComponent().appendingPathComponent("klepton-fork-test").path
     var request = InstallRequest(toolchain: URL(fileURLWithPath: toolchain).standardizedFileURL.path)
@@ -683,7 +708,7 @@ case "install", "stage":
         fail(L("For 'install', give the Apple Team ID with --team.", "Für 'install' die Apple-Team-ID mit --team angeben."))
     }
     let copying = CopyProgressPrinter()
-    var request = installRequest(o)
+    var request = installRequest(o, recipe: r.id)
     request.otherSourceBuilds = otherSourceBuilds(of: r, o)
     let installer = Installer(recipe: r, request: request, store: contentStore(o), progress: { copying.show($0) }) { print($0) }
     do {
@@ -696,10 +721,23 @@ case "install", "stage":
 case "toolchains":
     let all = toolchainPackager(o).installed()
     if all.isEmpty { print(L("No toolchain package is installed.", "Kein Toolchain-Paket installiert.")) }
-    for t in all {
+    // Dazu die als bearbeitet gekennzeichneten Arbeitskopien aus „Fix with AI“.
+    for t in all + FixWorkspace.modifiedToolchains() {
         guard let m = t.manifest else { continue }
-        print(L("Version \(m.version) (\(m.commit)), created \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)",
-                "Version \(m.version) (\(m.commit)), erstellt \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)"))
+        print(L("Version \(t.name) (\(m.commit)), created \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)",
+                "Version \(t.name) (\(m.commit)), erstellt \(ISO8601DateFormatter().string(from: m.created))  \(t.root.path)"))
+    }
+    if o.flags.contains("released") {
+        do {
+            let have = Set(all.map { $0.commit() })
+            for r in try await ToolchainReleases.list() where !have.contains(r.commit) {
+                print(L("Version \(r.version) (\(r.commit)), from AVP Play \(r.appVersion) on GitHub – avpplay toolchain get \(r.version)",
+                        "Version \(r.version) (\(r.commit)), aus AVP Play \(r.appVersion) auf GitHub – avpplay toolchain get \(r.version)"))
+            }
+        } catch { fail("\(error)") }
+    }
+    for (game, pin) in ToolchainChoices.load().games.sorted(by: { $0.key < $1.key }) {
+        print(L("\(game) is built with version \(pin.name) (\(pin.commit)).", "\(game) wird mit Version \(pin.name) (\(pin.commit)) gebaut."))
     }
 
 case "servers":
@@ -746,8 +784,10 @@ case "servers":
 case "renew":
     let chosen = (o.value("toolchain") ?? ProcessInfo.processInfo.environment["AVPPLAY_TOOLCHAIN"]).flatMap { try? Toolchain(root: URL(fileURLWithPath: $0)) }
     let dry = o.flags.contains("dry-run")
+    // Eine ausdrücklich genannte Toolchain gilt für alle Spiele; sonst je Spiel die dafür gewählte.
     let report = await Renewal.run(recipes: Renewal.recipes(bundled: recipesDirectory(o), drafts: DataLocation.base.appendingPathComponent("drafts", isDirectory: true)),
                                    store: contentStore(o), toolchain: chosen ?? toolchainPackager(o).installed().first,
+                                   choices: chosen == nil ? .load() : ToolchainChoices(), packager: toolchainPackager(o),
                                    preferredDevice: o.value("device"), dryRun: dry, force: Set(o.values["force"] ?? []), log: { print($0) })
     if !dry { report.save() }
     print(report.outcomes.isEmpty
@@ -794,8 +834,8 @@ case "saves":
 
 case "toolchain":
     guard o.positional.count >= 2 else {
-        fail(L("Usage: avpplay toolchain pack --from <Fork> --to <folder> | avpplay toolchain install <archive> | avpplay toolchain prune [--keep <count>]",
-               "Aufruf: avpplay toolchain pack --from <Fork> --to <Ordner> | avpplay toolchain install <Archiv> | avpplay toolchain prune [--keep <Anzahl>]"))
+        fail(L("Usage: avpplay toolchain pack --from <Fork> --to <folder> | avpplay toolchain install <archive> | avpplay toolchain prune [--keep <count>] | avpplay toolchain get <number> | avpplay toolchain mark <folder> | avpplay toolchain use <id> --toolchain <folder> | --newest",
+               "Aufruf: avpplay toolchain pack --from <Fork> --to <Ordner> | avpplay toolchain install <Archiv> | avpplay toolchain prune [--keep <Anzahl>] | avpplay toolchain get <Nummer> | avpplay toolchain mark <Ordner> | avpplay toolchain use <id> --toolchain <Ordner> | --newest"))
     }
     switch o.positional[1] {
     case "pack":
@@ -820,13 +860,63 @@ case "toolchain":
                     "Toolchain Version \(t.version()) (\(t.commit())) installiert: \(t.root.path)"))
         } catch { fail("\(error)") }
     case "prune":
-        // Alte Pakete entfernen; was ein offener Auftrag festhält, bleibt.
+        // Alte Pakete entfernen; was ein offener Auftrag festhält oder für ein Spiel gewählt ist, bleibt.
         do {
             let open = Set(jobStore(o).all().filter { [.waiting, .running, .failed].contains($0.state) }.map(\.toolchainCommit))
+                .union(ToolchainChoices.load().packageCommits)
             let keep = o.value("keep").flatMap { Int($0) } ?? 1
             let removed = try toolchainPackager(o).prune(keep: keep, protecting: open)
             if removed.isEmpty { print(L("Nothing to remove.", "Nichts zu entfernen.")) }
             for m in removed { print(L("Removed: version \(m.version) (\(m.commit))", "Entfernt: Version \(m.version) (\(m.commit))")) }
+        } catch { fail("\(error)") }
+    case "get":
+        guard o.positional.count >= 3, let number = Int(o.positional[2]) else {
+            fail(L("Give the toolchain's number: avpplay toolchain get <number> (see avpplay toolchains --released)",
+                   "Die Nummer der Toolchain angeben: avpplay toolchain get <Nummer> (siehe avpplay toolchains --released)"))
+        }
+        do {
+            guard let package = try await ToolchainReleases.list().first(where: { $0.version == number }) else {
+                fail(L("No release of AVP Play on GitHub came with toolchain \(number).", "Keine Veröffentlichung von AVP Play auf GitHub kam mit Toolchain \(number)."))
+            }
+            let t = try await ToolchainReleases.install(package, with: toolchainPackager(o))
+            print(L("Toolchain version \(t.version()) (\(t.commit())) installed: \(t.root.path)",
+                    "Toolchain Version \(t.version()) (\(t.commit())) installiert: \(t.root.path)"))
+            print(L("An automatic tidy-up removes it again unless it is chosen for a game: avpplay toolchain use <id> --toolchain \(t.root.path)",
+                    "Ein automatisches Aufräumen entfernt sie wieder, solange sie für kein Spiel gewählt ist: avpplay toolchain use <id> --toolchain \(t.root.path)"))
+        } catch { fail("\(error)") }
+    case "mark":
+        guard o.positional.count >= 3 else {
+            fail(L("Give the working copy: avpplay toolchain mark <folder>", "Arbeitskopie angeben: avpplay toolchain mark <Ordner>"))
+        }
+        do {
+            let t = try toolchainPackager(o).markModified(URL(fileURLWithPath: o.positional[2]).standardizedFileURL)
+            print(L("Marked as modified: toolchain \(t.name) in \(t.root.path). Games built with it say so on the Vision Pro and in AVP Play.",
+                    "Als bearbeitet gekennzeichnet: Toolchain \(t.name) in \(t.root.path). Damit gebaute Spiele sagen das auf der Vision Pro und in AVP Play."))
+        } catch { fail("\(error)") }
+    case "use":
+        // Die Wahl der Toolchain für ein Spiel – dieselbe, die seine Seite in der App anbietet.
+        let r = recipe(o, at: 2)
+        var choices = ToolchainChoices.load()
+        do {
+            if o.flags.contains("newest") {
+                choices.choose(nil, for: r.id)
+                try choices.save()
+                print(L("\(r.title) is built with the newest toolchain again.", "\(r.title) wird wieder mit der neuesten Toolchain gebaut."))
+            } else {
+                guard let folder = o.value("toolchain") else {
+                    fail(L("Give the toolchain with --toolchain <folder>, or --newest.", "Die Toolchain mit --toolchain <Ordner> angeben, oder --newest."))
+                }
+                let t = try Toolchain(root: URL(fileURLWithPath: folder).standardizedFileURL)
+                guard t.manifest != nil else { throw PackageError.notAWorkingCopy(t.root.path) }
+                guard r.toolchain.minCommit.isEmpty || t.satisfies(minCommit: r.toolchain.minCommit) else {
+                    throw ToolchainError.tooOld(have: t.commit(), need: r.toolchain.minCommit)
+                }
+                let pin = toolchainPackager(o).pin(for: t)
+                choices.choose(pin, for: r.id)
+                try choices.save()
+                print(L("\(r.title) is built with toolchain \(pin.name) (\(pin.commit)) from now on – when it is installed, updated or signed again. AVP Play does not remove or replace this toolchain. Back to the newest: avpplay toolchain use \(r.id) --newest, or on the game's page in the app.",
+                        "\(r.title) wird ab jetzt mit Toolchain \(pin.name) (\(pin.commit)) gebaut – beim Installieren, Aktualisieren und neu Signieren. AVP Play entfernt oder ersetzt diese Toolchain nicht. Zurück zur neuesten: avpplay toolchain use \(r.id) --newest, oder auf der Seite des Spiels in der App."))
+            }
         } catch { fail("\(error)") }
     default:
         fail(L("Unknown toolchain command '\(o.positional[1])'.", "Unbekannter Toolchain-Befehl '\(o.positional[1])'."))
@@ -846,8 +936,9 @@ case "status":
             print(L("Toolchain: version \(toolchain.version()) (\(toolchain.commit()))",
                     "Toolchain: Version \(toolchain.version()) (\(toolchain.commit()))"))
         }
+        let pins = ToolchainChoices.load().games
         for r in try RecipeStore(directory: recipesDirectory(o)).loadAll() {
-            let st = GameStatus.of(recipe: r, store: store, apps: apps, toolchainVersion: toolchain?.appRevision())
+            let st = GameStatus.of(recipe: r, store: store, apps: apps, toolchainVersion: toolchain?.appRevision(), pin: pins[r.id])
             var bestand = L("\(st.filesPresent)/\(st.filesRequired) files", "\(st.filesPresent)/\(st.filesRequired) Dateien")
             if st.treesRequired > 0 {
                 bestand += L(", \(st.treesPresent)/\(st.treesRequired) folders", ", \(st.treesPresent)/\(st.treesRequired) Ordner")
@@ -858,7 +949,9 @@ case "status":
             case .notInstalled: geraet = L("not installed", "nicht installiert")
             case .current(let stamp): geraet = L("installed, \(stamp)", "installiert, \(stamp)")
             case .olderToolchain(let stamp):
-                geraet = L("installed, \(stamp) – built with an older toolchain", "installiert, \(stamp) – mit älterer Toolchain gebaut")
+                geraet = pins[r.id].map { L("installed, \(stamp) – not built with toolchain \($0.name), which is chosen for this game",
+                                            "installiert, \(stamp) – nicht mit Toolchain \($0.name) gebaut, die für dieses Spiel gewählt ist") }
+                    ?? L("installed, \(stamp) – built with an older toolchain", "installiert, \(stamp) – mit älterer Toolchain gebaut")
             case .olderGame(let stamp):
                 geraet = L("installed, \(stamp) – an older version of the game", "installiert, \(stamp) – eine ältere Fassung des Spiels")
             case .unstamped(let stamp):
@@ -918,7 +1011,7 @@ case "job":
             fail(L("For a job, give the Apple Team ID with --team.", "Für einen Auftrag die Apple-Team-ID mit --team angeben."))
         }
         let r = recipe(o, at: 2)
-        var request = installRequest(o)
+        var request = installRequest(o, recipe: r.id)
         request.otherSourceBuilds = otherSourceBuilds(of: r, o)
         if addonsOnly { request.addons = true }
         if downloadOnly { request.downloadOnly = true }

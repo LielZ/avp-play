@@ -131,6 +131,12 @@ struct FeedbackBox: View {
                 if !(game.fromStore && game.recipe.catalogAppId != nil && model.onlineCatalog) {
                     // Sonderapps kennt der Katalog nicht, und ohne Katalog gibt es keinen Empfänger.
                     EmptyView()
+                } else if game.status.builtWith?.modified == true {
+                    // Die Meldungen entscheiden über das Kennzeichen des Spiels und meinen die Toolchain des Projekts.
+                    Text(L("This build comes from a modified toolchain. Reports are about the toolchains the project released, so none is sent for it.",
+                           "Dieser Bau stammt aus einer modifizierten Toolchain. Rückmeldungen gelten den Toolchains, die das Projekt veröffentlicht hat; für ihn wird deshalb keine gesendet."))
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if let sent = model.feedbackSent(game) {
                     Label(L("You reported: \(label(sent)). Thank you.", "Du hast gemeldet: \(label(sent)). Danke."), systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
@@ -630,6 +636,9 @@ struct GameDetail: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
 
+                // Erst wenn feststeht, woraus das Spiel besteht, und es etwas zu bauen gibt.
+                if game.prepared, model.toolchainText != nil { ToolchainBox(game: game) }
+
                 if model.hasSaves(game), game.installed || model.saveSnapshots[game.id] != nil { SavesBox(game: game) }
 
                 if !languageFiles.isEmpty || game.recipe.addons != nil || !extras.isEmpty { optionalContent }
@@ -774,8 +783,25 @@ struct GameDetail: View {
         case .unknown: return L("The Vision Pro is not reachable right now.", "Die Vision Pro ist gerade nicht erreichbar.")
         case .notInstalled: return L("Not installed yet.", "Noch nicht installiert.")
         case .otherSource(let stamp): return L("On the Vision Pro from the other purchase source (\(stamp)).", "Auf der Vision Pro aus der anderen Kaufquelle (\(stamp)).")
-        case .current: return L("Installed and up to date.", "Installiert und auf dem neuesten Stand.")
-        case .olderToolchain: return L("Installed. The current toolchain produces a newer build – “Update” builds it; saved games and data are kept.", "Installiert. Mit der jetzigen Toolchain gibt es eine neuere Fassung – „Aktualisieren“ baut sie; Spielstände und Daten bleiben.")
+        case .current:
+            // Wo eine Toolchain gewählt ist oder der Bau aus einer bearbeiteten Arbeitskopie stammt, steht sie dabei.
+            if let pin = model.toolchainChoices.games[game.id] {
+                return L("Installed, built with toolchain \(pin.name), which is chosen for this game.", "Installiert, gebaut mit Toolchain \(pin.name), die für dieses Spiel gewählt ist.")
+            }
+            if let built = game.status.builtWith, built.modified {
+                return L("Installed, built with toolchain \(Toolchain.name(version: built.toolchain, modified: true)).", "Installiert, gebaut mit Toolchain \(Toolchain.name(version: built.toolchain, modified: true)).")
+            }
+            return L("Installed and up to date.", "Installiert und auf dem neuesten Stand.")
+        case .olderToolchain:
+            if let pin = model.toolchainChoices.games[game.id] {
+                return L("Installed, but not built with toolchain \(pin.name), which is chosen for this game – “Update” builds it with that one; saved games and data are kept.",
+                         "Installiert, aber nicht mit Toolchain \(pin.name) gebaut, die für dieses Spiel gewählt ist – „Aktualisieren“ baut es mit ihr; Spielstände und Daten bleiben.")
+            }
+            if let built = game.status.builtWith, built.modified {
+                return L("Installed, built with toolchain \(Toolchain.name(version: built.toolchain, modified: true)). “Update” replaces this build with one from the newest toolchain, without the changes of the modified one (see “Toolchain” below); saved games and data are kept.",
+                         "Installiert, gebaut mit Toolchain \(Toolchain.name(version: built.toolchain, modified: true)). „Aktualisieren“ ersetzt diesen Bau durch einen aus der neuesten Toolchain, ohne die Änderungen der modifizierten (siehe unten unter „Toolchain“); Spielstände und Daten bleiben.")
+            }
+            return L("Installed. The current toolchain produces a newer build – “Update” builds it; saved games and data are kept.", "Installiert. Mit der jetzigen Toolchain gibt es eine neuere Fassung – „Aktualisieren“ baut sie; Spielstände und Daten bleiben.")
         case .olderGame(let stamp): return L("Installed in an older version of the game (\(stamp)). This app now has version \(game.recipe.versionName) – “Update” downloads what is new and installs it; saved games and data are kept.",
                                              "Installiert in einer älteren Fassung des Spiels (\(stamp)). Dieses Programm hat jetzt Fassung \(game.recipe.versionName) – „Aktualisieren“ lädt, was neu ist, und installiert sie; Spielstände und Daten bleiben erhalten.")
         case .unstamped: return L("Installed, but as an older build that was not made by this app. “Update” replaces it; saved games and data are kept.", "Installiert, aber in einer älteren Fassung, die nicht von diesem Programm stammt. „Aktualisieren“ ersetzt sie; Spielstände und Daten bleiben.")

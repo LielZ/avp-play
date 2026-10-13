@@ -220,6 +220,14 @@ final class AppModel: ObservableObject {
     @Published var latestChoices = StoreUpdate.Choices.load()
     /// Ältere Toolchains von selbst entfernen, sobald eine neuere installiert ist und nichts mehr mit ihnen baut.
     @AppStorage("autoRemoveOldToolchains") var autoRemoveOldToolchains = true
+    /// Für welche Spiele eine andere Toolchain als die neueste gewählt ist (siehe `ToolchainChoices`).
+    @Published var toolchainChoices = ToolchainChoices.load()
+    /// Die Pakete früherer Veröffentlichungen auf GitHub; `nil`, solange niemand danach gefragt hat.
+    @Published var releasedToolchains: [ReleasedToolchain]?
+    @Published var releasedToolchainsLoading = false
+    /// Je Spiel die Nummer des Pakets, das gerade für es geladen wird.
+    @Published var toolchainArriving: [String: ReleasedToolchain] = [:]
+    @Published var toolchainNote: [String: String] = [:]
     /// Besorgt diese Bilder: zwei Abrufe zugleich, mit Zwischenspeicher.
     let covers = CoverLoader()
     @AppStorage("filterFavourites") var filterFavourites = false
@@ -354,6 +362,7 @@ final class AppModel: ObservableObject {
         // (Gerät fragen, jeden Ordner im Bestand zählen) dauert Sekunden und ändert an den anderen Spielen nichts.
         let id = game.id, catalog = game.catalog
         let paths = paths, apps = installedApps, revision = toolchainRevision, prefix = bundlePrefix, drafts = draftsDirectory
+        let pin = toolchainChoices.games[id]
         Task.detached(priority: .userInitiated) {
             var fresh: Game?
             if let recipes = paths.recipes {
@@ -362,7 +371,7 @@ final class AppModel: ObservableObject {
                     let variants = store.loadVariants(), sources = store.loadSources()
                     let active = StoreUpdate.resolve([tested], variants: variants, sources: sources, drafts: drafts, choices: choices).first ?? tested
                     fresh = Probe.game(active, draft: false, tested: tested, variants: variants, sources: sources, paths: paths,
-                                       apps: apps, toolchainRevision: revision, bundlePrefix: prefix)
+                                       apps: apps, toolchainRevision: revision, pin: pin, bundlePrefix: prefix)
                     fresh?.catalog = catalog
                 }
             }
@@ -726,10 +735,21 @@ final class AppModel: ObservableObject {
             return L("“\(name)” is ticked but not on this Mac yet (see “Optional Content”).",
                      "„\(name)“ ist angehakt, liegt aber noch nicht auf diesem Mac (siehe „Wählbare Inhalte“).")
         }
+        // Ist für das Spiel eine Toolchain gewählt, wird mit keiner anderen gebaut – auch nicht, wenn sie fehlt.
+        let pin = toolchainChoices.games[game.id]
+        if let arriving = toolchainArriving[game.id] {
+            return L("Toolchain \(arriving.version) is being downloaded for this game.", "Toolchain \(arriving.version) wird für dieses Spiel geladen.")
+        }
+        if let pin, paths.packager.toolchain(for: pin) == nil {
+            return L("Toolchain \(pin.name), chosen for this game, is no longer on this Mac. Choose one under “Toolchain” below.",
+                     "Toolchain \(pin.name), für dieses Spiel gewählt, liegt nicht mehr auf diesem Mac. Wähle unten unter „Toolchain“ eine.")
+        }
         // Ein Entwurf, der ohne Toolchain nachgeschlagen wurde, nennt noch keinen Mindeststand; der wird beim Anlegen
         // des Auftrags eingesetzt.
-        if let t = toolchain, !game.recipe.toolchain.minCommit.isEmpty, !t.satisfies(minCommit: game.recipe.toolchain.minCommit) {
-            return L("This game needs a newer toolchain than the one installed.", "Dieses Spiel braucht eine neuere Toolchain als die installierte.")
+        if let t = toolchain(for: game), !game.recipe.toolchain.minCommit.isEmpty, !t.satisfies(minCommit: game.recipe.toolchain.minCommit) {
+            return pin == nil ? L("This game needs a newer toolchain than the one installed.", "Dieses Spiel braucht eine neuere Toolchain als die installierte.")
+                              : L("This game needs a newer toolchain than the one chosen for it (see “Toolchain” below).",
+                                  "Dieses Spiel braucht eine neuere Toolchain als die dafür gewählte (siehe unten unter „Toolchain“).")
         }
         if isBusy(game.id) { return L("A job for this game is already running.", "Für dieses Spiel läuft schon ein Auftrag.") }
         // Platz für den Download, mit zwei Gigabyte Luft für Bau und Zwischenstände.
@@ -767,6 +787,7 @@ final class AppModel: ObservableObject {
         // Vor den Spielen: daraus wird die Liste aller Spiele gebaut, und die braucht den neuen Stand des Geräts.
         installedApps = s.apps
         toolchainRevision = s.toolchainRevision
+        toolchainChoices = s.toolchainChoices
         games = s.games
         loadOwnCatalogEntries()
         checkStoreVersions()
@@ -982,7 +1003,8 @@ final class AppModel: ObservableObject {
         guard autoRemoveOldToolchains, runningJob == nil else { return }
         let paths = paths
         let active = jobs.filter { $0.state == .waiting || $0.state == .running }
-        let open = Set(active.map(\.toolchainCommit)), busy = Set(active.map(\.recipe.toolchain.target))
+        // Was für ein Spiel gewählt ist oder gerade für eines geladen wird, bleibt wie das, womit ein Auftrag begann.
+        let open = Set(active.map(\.toolchainCommit)).union(keptToolchainCommits), busy = Set(active.map(\.recipe.toolchain.target))
         // Die Kopie des APK heißt nicht bei jedem Spiel wie sein Target; den Namen kennt das Rezept.
         var apkNames: [String: String] = [:]
         for recipe in games.map(\.recipe) + jobs.map(\.recipe) {
@@ -1131,7 +1153,7 @@ final class AppModel: ObservableObject {
     func enqueue(_ game: Game, steps: [InstallStep], addons: Bool? = nil, show: Bool = true) {
         // Nur wer baut oder aufs Gerät kopiert, braucht die Toolchain.
         let downloadOnly = steps == InstallStep.download
-        let toolchain = toolchain
+        let toolchain = toolchain(for: game)
         guard toolchain != nil || downloadOnly else { return }
         // Ein Entwurf, der ohne Toolchain nachgeschlagen wurde: Jetzt, wo gebaut wird, steht fest, mit welchem Stand.
         var recipe = game.recipe
@@ -1175,6 +1197,9 @@ final class AppModel: ObservableObject {
     /// Spiele, für die es eine neuere Fassung gibt und denen nichts im Weg steht.
     var updatable: [Game] {
         games.filter { game in
+            // Ein Bau aus einer bearbeiteten Arbeitskopie, die für das Spiel nicht gewählt ist, wird nicht im
+            // Sammelauftrag ersetzt: Das entscheidet der Nutzer auf der Seite des Spiels.
+            if game.status.builtWith?.modified == true, toolchainChoices.games[game.id] == nil { return false }
             switch game.status.onDevice {
             case .olderToolchain, .olderGame, .unstamped: return blocker(for: game) == nil
             case .current, .notInstalled, .unknown, .otherSource: return false

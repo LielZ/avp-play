@@ -61,6 +61,16 @@ public struct Toolchain: Sendable {
         return try? ToolchainPackager.decoder.decode(ToolchainManifest.self, from: data)
     }
 
+    /// Eine bearbeitete Arbeitskopie (siehe `ToolchainManifest.modified`)?
+    public var isModified: Bool { manifest?.modified == true }
+
+    /// Wie ein Stand in Listen und Sätzen heißt: seine Nummer, bei einer bearbeiteten Arbeitskopie mit dem Zusatz.
+    public static func name(version: Int, modified: Bool) -> String {
+        modified ? L("\(version) (modified)", "\(version) (modifiziert)") : "\(version)"
+    }
+
+    public var name: String { Toolchain.name(version: version(), modified: isModified) }
+
     public func commit() -> String {
         if let m = manifest { return m.commit }
         let out = (try? Toolchain.capture(["/usr/bin/git", "-C", root.path, "rev-parse", "--short=7", "HEAD"]))?
@@ -258,7 +268,7 @@ public struct Toolchain: Sendable {
         // Eine installierte App zeigt das Startfenster eines Spiels, nicht den Boot-Bericht der Entwicklung.
         env["KLEPTON_START_SCREEN"] = "1"
         env["KLEPTON_APP_VERSION"] = AppStamp.short(versionName: recipe.versionName)
-        env["KLEPTON_APP_BUILD"] = AppStamp.build(versionCode: recipe.versionCode, toolchainVersion: version())
+        env["KLEPTON_APP_BUILD"] = AppStamp.build(versionCode: recipe.versionCode, toolchainVersion: version(), modified: isModified)
         if let bundleId { env["KLEPTON_BUNDLE_ID"] = bundleId }
         // Ein kostenloses Team bekommt von Apple „Increased Memory Limit“, aber weder „Extended Virtual
         // Addressing“ noch „Low-Latency Streaming“. Mit einer der beiden im Auftrag scheitert die ganze Signatur.

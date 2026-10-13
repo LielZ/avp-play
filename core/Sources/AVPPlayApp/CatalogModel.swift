@@ -162,7 +162,8 @@ extension AppModel {
         for entry in catalog where !known.contains(entry.appId) {
             let recipe = DraftRecipe.placeholder(game: entry)
             out.append(Game(recipe: recipe,
-                            status: GameStatus.of(recipe: recipe, store: paths.store, apps: installedApps, toolchainVersion: toolchainRevision, bundlePrefix: prefix),
+                            status: GameStatus.of(recipe: recipe, store: paths.store, apps: installedApps, toolchainVersion: toolchainRevision,
+                                                  pin: toolchainChoices.games[recipe.id], bundlePrefix: prefix),
                             cover: nil, catalog: entry, draft: true))
         }
         allGames = out
@@ -287,7 +288,7 @@ extension AppModel {
         guard onlineCatalog, let appId = game.recipe.catalogAppId else { return }
         let comment = game.recipe.source == .steam ? CatalogFeedback.steamMark + comment : comment
         let feedback = CatalogFeedback(appId: appId, versionCode: game.recipe.versionCode, result: result, comment: comment,
-                                       appVersion: appVersion, toolchain: toolchain.map { String($0.version()) } ?? "", lang: language.rawValue)
+                                       appVersion: appVersion, toolchain: toolchain(for: game).map { String($0.version()) } ?? "", lang: language.rawValue)
         let key = feedbackKey(game)
         Task {
             do {

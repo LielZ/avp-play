@@ -55,14 +55,19 @@ extension AppModel {
     func fixPrompt(for game: Game, symptoms: Set<Symptom>, details: String) -> String {
         let recipe = game.recipe
         let target = recipe.toolchain.target
+        // Die Toolchain, mit der dieses Spiel gebaut wird: die dafür gewählte, sonst die neueste.
+        let toolchain = toolchain(for: game) ?? toolchain
         let toolchainRoot = toolchain?.root.path ?? "<toolchain not installed – install it in AVP Play first>"
-        let toolchainName = toolchain.map { "version \($0.version()) (\($0.commit()))" } ?? "unknown"
+        let toolchainName = toolchain.map { "version \($0.version())\($0.isModified ? " (modified)" : "") (\($0.commit()))" } ?? "unknown"
         let recipesDir = game.draft ? draftsDirectory.path : (paths.recipes?.path ?? "<recipes folder>")
         let storeDir = paths.store.directory(for: recipe).path
         let bundleId = Toolchain.bundleId(target: target, prefix: customBundlePrefix.isEmpty ? nil : customBundlePrefix)
         let cli = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/avpplay").path
         let cliNote = FileManager.default.isExecutableFile(atPath: cli) ? "" : "  (if this file is missing, use the `avpplay` command-line tool built from the AVP Play repository)"
-        let work = "~/avpplay-fix/\(target)"
+        let work = "~/\(FixWorkspace.folderName)/\(target)"
+        // Wird das Spiel schon aus der Arbeitskopie eines früheren Fixes gebaut, geht es dort weiter.
+        let continuing = toolchain.map { $0.isModified && $0.root.standardizedFileURL.path == FixWorkspace.root.appendingPathComponent(target).path } ?? false
+        let number = toolchain.map { String($0.version()) } ?? "N"
         let udid = device?.udid ?? "<UDID of the Vision Pro: xcrun devicectl list devices>"
         let chosen = Symptom.allCases.filter(symptoms.contains)
         let symptomList = chosen.isEmpty ? "- (not specified – ask the user what exactly happens)" : chosen.map { "- \($0.rawValue): \($0.title)" }.joined(separator: "\n")
@@ -73,6 +78,18 @@ extension AppModel {
         // Unter welcher Kennung der Dienst des Projekts das Spiel führt: die Store-Kennung, und bei einem Spiel, das
         // nicht aus dem Meta-Store kommt, der Name seines Rezepts.
         let fixIdentifier = recipe.store.appId ?? recipe.id
+
+        // Der erste Schritt: die Arbeitskopie anlegen und kennzeichnen – oder in der eines früheren Fixes weitermachen.
+        let copyStep = continuing ? """
+        1. This game is already built from the working copy of an earlier fix: \(work). It is marked as modified and under version control (tag `baseline` is the toolchain as the project shipped it). Continue there – do not create a new copy, and do not edit the installed toolchain.
+        """ : """
+        1. Do not edit the installed toolchain. Make a working copy without build products and game files, mark it as modified, and put it under version control so the change can be shown as a diff.
+           If \(work) already exists, stop: it holds earlier work. Do not copy over it – ask me whether to continue there or to move it aside under another name first.
+           mkdir -p \(work) && rsync -a --exclude build --exclude visionos/build --exclude '/\(target)/' --exclude '*.apk' "\(toolchainRoot)/" \(work)/
+           "\(cli)" toolchain mark \(work)
+           cd \(work) && git init -q && git add -A && git commit -qm baseline && git tag baseline
+           The mark is one line in the copy's toolchain.json. From then on AVP Play and the headset call everything built from this copy "toolchain \(number) (modified)" instead of "toolchain \(number)", so that I can tell my changed build from the project's. Always run the mark command, before the first build; never remove the mark, and do not change `version` or `commit` in toolchain.json.
+        """
 
         return """
         You are helping me get a VR game to run on my Apple Vision Pro. I installed it with AVP Play, an open-source Mac app that translates Meta Quest games I own with the Klepton toolchain. The game installs but does not work properly. Please find out why and fix it in the toolchain. Talk to me in \(language).
@@ -97,9 +114,7 @@ extension AppModel {
         - AVP Play's command-line tool: \(cli)\(cliNote)
 
         ## How to work
-        1. Do not edit the installed toolchain. Make a working copy without build products and game files, and put it under version control so the change can be shown as a diff:
-           mkdir -p \(work) && rsync -a --exclude build --exclude visionos/build --exclude '/\(target)/' --exclude '*.apk' "\(toolchainRoot)/" \(work)/
-           cd \(work) && git init -q && git add -A && git commit -qm baseline && git tag baseline
+        \(copyStep)
         2. Build and install from the working copy (this replaces the game on the headset; saved games and data stay):
            AVPPLAY_LANG=en "\(cli)" install \(recipe.id) --recipes "\(recipesDir)" --toolchain \(work) --team \(teamValid ? teamId : "<Apple team ID>")
            The command checks ownership with Meta, uses the files already downloaded, builds, signs and installs. It stops if the game is running on the headset – ask me to quit it first.
@@ -121,7 +136,7 @@ extension AppModel {
         \(chosen.isEmpty ? Symptom.other.hint : chosen.map { "- " + $0.hint }.joined(separator: "\n"))
 
         ## Rules
-        - Change only files in the working copy \(work). Leave the installed toolchain, the downloaded game files and AVP Play's data alone.
+        - Change only files in the working copy \(work). Leave the installed toolchain, the downloaded game files and AVP Play's data alone; the `toolchain mark` and `toolchain use` commands named here are the only way you tell AVP Play about the copy.
         - Never copy, upload or quote game content (the APK, its libraries, assets or data). Reading it to understand a problem is fine.
         - Do not touch my Meta sign-in: do not read the keychain, do not run `avpplay login` or `logout`, and do not make requests to Meta other than what the install command does by itself.
         - Do not remove ownership or purchase checks, and do not make the game report content as purchased that I have not bought.
@@ -129,7 +144,11 @@ extension AppModel {
         - If you cannot fix it, say so plainly and tell me what you found.
 
         ## When I confirm that it works
-        As soon as I say the game works, offer – without being asked – to send the change to the AVP Play project so that other people get it too. A maintainer reads every submission before anything is done with it. Show me what would be sent (a short summary and the diff) and ask for my go-ahead first. If I say no, leave it at that. If I say yes:
+        First make sure the working build stays. Tell AVP Play to keep building this game from the working copy:
+           "\(cli)" toolchain use \(recipe.id) --recipes "\(recipesDir)" --toolchain \(work)
+        Then tell me what that means, in two or three sentences: AVP Play now shows this game as built with "toolchain \(number) (modified)" and uses the copy whenever the game is installed, updated or signed again, so an update of AVP Play no longer replaces my working build; I must keep the folder \(work) for as long as that is so; and under "Toolchain" on the game's page in AVP Play I can go back to the project's newest toolchain at any time – which I should do once a release of AVP Play contains the fix.
+
+        Then offer – without being asked – to send the change to the AVP Play project so that other people get it too. A maintainer reads every submission before anything is done with it. Show me what would be sent (a short summary and the diff) and ask for my go-ahead first. If I say no, leave it at that. If I say yes:
         1. Create the diff of source changes only:
            cd \(work) && git add -N . && git diff --no-color baseline -- . ':(exclude)vendor' ':(exclude)vendor-moltenvk' > /tmp/avpplay-fix.patch
            Check that it contains no game content and no binary files, and that it is under 256 KB.

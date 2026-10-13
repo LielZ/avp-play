@@ -124,6 +124,13 @@ engine. Each verified game needed its own adjustments before it ran, so expect a
 Afterwards say how it went with one click (that is what the labels are made of), or let an AI coding assistant
 try to fix it ("Fix with AI") and send the fix in for review.
 
+A game is built with the newest toolchain. From version 1.1.12 its page lets you choose another one for it: an
+older package – one still on your Mac, or one that came with an earlier release, which the app downloads from
+this repository's releases and checks before it installs it – or a working copy that an AI assistant changed
+while fixing the game, shown as "(modified)". The game then stays on that toolchain when the app gets a newer
+one, when the game is updated and when its signature is renewed. The app removes older toolchains by itself to
+save disk space; one that is chosen for a game stays, and a switch in Settings turns the tidying off.
+
 All twenty-one were installed with this app on the author's headset. "Community Verified" means exactly what it
 says: reports from users, not a guarantee. A recipe is tied to one build of a game; other builds need
 their own recipe.

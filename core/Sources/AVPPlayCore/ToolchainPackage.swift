@@ -20,6 +20,10 @@ public struct ToolchainManifest: Codable, Sendable, Equatable {
     /// oder einem späteren Stand gebaut wurde, ist aktuell – auch wenn die Toolchain seither neuere Nummern
     /// bekommen hat, etwa für ein geändertes Bauskript. Fehlt bei älteren Paketen; dann gilt `version`.
     public var appRevision: Int?
+    /// Gesetzt bei einer Arbeitskopie, an der jemand etwas geändert hat (etwa eine KI beim Reparieren eines Spiels):
+    /// kein Stand des Projekts mehr, auch wenn Nummer und Commit die des Pakets sind, aus dem sie entstand. Überall,
+    /// wo der Stand genannt wird, steht dann „(modified)“ dabei.
+    public var modified: Bool?
 
     public func contains(commit wanted: String) -> Bool {
         guard wanted.count >= 7, wanted.allSatisfy({ $0.isHexDigit }) else { return false }
@@ -36,6 +40,8 @@ public enum PackageError: Error, CustomStringConvertible, Equatable {
     case checksumMismatch
     case sizeMismatch
     case contentMismatch
+    case notAWorkingCopy(String)
+    case installedPackage(String)
 
     public var description: String {
         switch self {
@@ -58,6 +64,12 @@ public enum PackageError: Error, CustomStringConvertible, Equatable {
         case .contentMismatch:
             return L("The archive contains a different state than its description says. It will not be installed.",
                      "Das Archiv enthält einen anderen Stand, als seine Beschreibung angibt. Es wird nicht installiert.")
+        case .notAWorkingCopy(let p):
+            return L("\(p) is not a copy of an installed toolchain (visionos/run.sh or toolchain.json is missing).",
+                     "\(p) ist keine Kopie einer installierten Toolchain (visionos/run.sh oder toolchain.json fehlt).")
+        case .installedPackage(let p):
+            return L("\(p) is a toolchain that AVP Play installed. Work in a copy of it and mark the copy.",
+                     "\(p) ist eine von AVP Play installierte Toolchain. Arbeite in einer Kopie davon und markiere die Kopie.")
         }
     }
 }
@@ -190,6 +202,26 @@ public struct ToolchainPackager: Sendable {
             .compactMap { try? Toolchain(root: $0) }
             .filter { $0.manifest != nil }
             .sorted { ($0.manifest?.version ?? 0) > ($1.manifest?.version ?? 0) }
+    }
+
+    /// Liegt dieser Ordner unter den installierten Paketen?
+    public func holds(_ toolchain: URL) -> Bool {
+        toolchain.resolvingSymlinksInPath().deletingLastPathComponent().path == root.resolvingSymlinksInPath().path
+    }
+
+    /// Kennzeichnet eine Arbeitskopie als bearbeitet (`modified` in ihrer `toolchain.json`). Ein installiertes Paket
+    /// wird nicht gekennzeichnet: Es ist der Stand des Projekts und soll es bleiben.
+    @discardableResult
+    public func markModified(_ copy: URL) throws -> Toolchain {
+        guard let toolchain = try? Toolchain(root: copy), var manifest = toolchain.manifest else {
+            throw PackageError.notAWorkingCopy(copy.path)
+        }
+        guard !holds(copy) else { throw PackageError.installedPackage(copy.path) }
+        if manifest.modified != true {
+            manifest.modified = true
+            try ToolchainPackager.encoder.encode(manifest).write(to: copy.appendingPathComponent("toolchain.json"), options: .atomic)
+        }
+        return toolchain
     }
 
     /// Entfernt installierte Pakete bis auf die `keep` neuesten und gibt die entfernten zurück.
@@ -355,8 +387,24 @@ public enum AppStamp {
         return "1.0"
     }
 
-    /// `CFBundleVersion`: Versionscode des Spiels und Nummer der Toolchain.
-    public static func build(versionCode: Int, toolchainVersion: Int) -> String {
-        "\(max(0, min(versionCode, 999_999_999))).\(max(0, min(toolchainVersion, 999_999_999)))"
+    /// `CFBundleVersion`: Versionscode des Spiels und Nummer der Toolchain – und eine dritte Zahl 1, wenn die
+    /// Toolchain eine bearbeitete Arbeitskopie war. Mehr als drei Zahlen nimmt der Schlüssel nicht.
+    public static func build(versionCode: Int, toolchainVersion: Int, modified: Bool = false) -> String {
+        "\(max(0, min(versionCode, 999_999_999))).\(max(0, min(toolchainVersion, 999_999_999)))" + (modified ? ".1" : "")
+    }
+
+    /// Was ein Stempel dieses Werkzeugs über den Bau sagt.
+    public struct Built: Sendable, Equatable {
+        public var versionCode: Int
+        public var toolchain: Int
+        public var modified: Bool
+    }
+
+    /// Liest `CFBundleVersion` einer installierten App; `nil`, wenn es kein Stempel dieses Werkzeugs ist.
+    public static func parse(_ bundleVersion: String) -> Built? {
+        let parts = bundleVersion.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard parts.count == 2 || parts.count == 3, let code = parts[0], let toolchain = parts[1] else { return nil }
+        guard parts.count == 2 || parts[2] != nil else { return nil }
+        return Built(versionCode: code, toolchain: toolchain, modified: parts.count == 3 && parts[2] == 1)
     }
 }
