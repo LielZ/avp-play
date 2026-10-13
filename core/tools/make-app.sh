@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(cd .. && pwd)"
-VERSION="${AVPPLAY_APP_VERSION:-1.1.11}"
+VERSION="${AVPPLAY_APP_VERSION:-1.1.12}"
 BUILD="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 OUT="$ROOT/dist/AVP Play.app"
 
@@ -24,6 +24,14 @@ cp "$BIN" "$NEW/Contents/MacOS/AVPPlay"
 # und im selben Ordner würde die eine Datei die andere ersetzen.
 mkdir -p "$NEW/Contents/Helpers"
 cp ".build-app/release/avpplay" "$NEW/Contents/Helpers/avpplay"
+# Ohne die Verweise auf die Bauprodukte: Der Linker trägt in jedes Programm ein, wo die Objektdateien und Quellen
+# auf dem bauenden Rechner lagen – der Benutzername und die Ordner dieses Macs, in jedem veröffentlichten Abbild.
+# `strip -S` nimmt genau diese Einträge heraus; das Programm selbst und seine Symbole bleiben. Vor dem Signieren.
+xcrun strip -S "$NEW/Contents/MacOS/AVPPlay" "$NEW/Contents/Helpers/avpplay"
+if LC_ALL=C grep -a -q -E '/Users/[A-Za-z0-9._-]+/' "$NEW/Contents/MacOS/AVPPlay" "$NEW/Contents/Helpers/avpplay"; then
+  echo "!! in den Programmen steht noch ein Pfad dieses Rechners" >&2
+  exit 1
+fi
 cp "$ROOT"/recipes/*.json "$NEW/Contents/Resources/recipes/"
 # Weitere geprüfte Fassungen einzelner Spiele (RecipeStore.loadVariants), soweit es welche gibt.
 if ls "$ROOT"/recipes/versions/*.json >/dev/null 2>&1; then
