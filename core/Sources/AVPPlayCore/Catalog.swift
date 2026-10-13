@@ -157,6 +157,13 @@ public struct CatalogClient: Sendable {
         self.session = session
     }
 
+    /// Der Dienst, mit dem dieses Programm spricht: der des Projekts, oder der aus `AVPPLAY_CATALOG` (ein Probelauf
+    /// gegen einen eigenen).
+    public static var configured: CatalogClient {
+        if let custom = ProcessInfo.processInfo.environment["AVPPLAY_CATALOG"], let url = URL(string: custom) { return CatalogClient(base: url) }
+        return CatalogClient()
+    }
+
     private func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
         var parts = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { parts.queryItems = query }
@@ -237,14 +244,16 @@ public struct CatalogClient: Sendable {
     static let maxCoverBytes = 1_000_000
 
     /// Das Titelbild, das der Dienst für ein Spiel bereithält (`CatalogGame.cover`). `nil`, wenn er keins hat, nicht
-    /// erreichbar ist oder etwas anderes als ein Bild in dieser Größe schickt.
-    public func cover(appId: String) async -> Data? {
+    /// erreichbar ist oder etwas anderes als ein Bild in dieser Größe und Form schickt. `square`: das quadratische
+    /// daneben, für das Icon des installierten Spiels.
+    public func cover(appId: String, square: Bool = false) async -> Data? {
         guard CatalogGame.isIdentifier(appId) else { return nil }
-        var r = request("api/v1/covers/\(appId)")
+        var r = request("api/v1/covers/\(appId)", query: square ? [URLQueryItem(name: "shape", value: "square")] : [])
         r.setValue("image/jpeg", forHTTPHeaderField: "Accept")
         guard let (data, response) = try? await session.data(for: r), let http = response as? HTTPURLResponse, http.statusCode == 200,
               http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("image/") == true,
-              data.count <= CatalogClient.maxCoverBytes, StoreArt.pixelSize(data) != nil else { return nil }
+              data.count <= CatalogClient.maxCoverBytes, let size = StoreArt.pixelSize(data),
+              square ? StoreArt.isSquareCover(width: size.width, height: size.height) : size.width > size.height else { return nil }
         return data
     }
 

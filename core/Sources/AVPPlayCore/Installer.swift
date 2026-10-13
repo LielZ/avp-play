@@ -518,6 +518,12 @@ public struct Installer: Sendable {
             if let image = await StoreArt().squareCover(appId: app) {
                 try image.write(to: cover, options: .atomic)
                 report(L("Icon: fetched the cover image from the store page.", "Icon: Titelbild von der Store-Seite geholt."))
+            } else if let image = await CatalogClient.configured.cover(appId: app, square: true) {
+                // Manche Store-Seiten zeigen öffentlich kein Bild (Richie's Plank Experience); für solche Spiele hält
+                // der Katalogdienst des Projekts eins bereit.
+                try image.write(to: cover, options: .atomic)
+                report(L("Icon: the store page shows no cover image – fetched it from the project's catalogue.",
+                         "Icon: die Store-Seite zeigt kein Titelbild – vom Katalog des Projekts geholt."))
             } else {
                 report(L("Icon: no square cover image found on the store page – keeping the icon from the APK.",
                          "Icon: kein quadratisches Titelbild auf der Store-Seite gefunden – es bleibt beim Icon aus dem APK."))
@@ -525,11 +531,16 @@ public struct Installer: Sendable {
         }
         // Dasselbe im Querformat, für das Startfenster der App.
         let wide = StartHero.storeURL(store: store, recipe: recipe)
-        if request.storeArt, !FileManager.default.fileExists(atPath: wide.path), let app = recipe.catalogAppId,
-           let image = await StoreArt().landscapeCover(appId: app) {
-            try image.write(to: wide, options: .atomic)
-            report(L("Start image: fetched the landscape cover image from the store page.",
-                     "Startbild: Titelbild im Querformat von der Store-Seite geholt."))
+        if request.storeArt, !FileManager.default.fileExists(atPath: wide.path), let app = recipe.catalogAppId {
+            if let image = await StoreArt().landscapeCover(appId: app) {
+                try image.write(to: wide, options: .atomic)
+                report(L("Start image: fetched the landscape cover image from the store page.",
+                         "Startbild: Titelbild im Querformat von der Store-Seite geholt."))
+            } else if let image = await CatalogClient.configured.cover(appId: app) {
+                try image.write(to: wide, options: .atomic)
+                report(L("Start image: the store page shows no cover image – fetched it from the project's catalogue.",
+                         "Startbild: die Store-Seite zeigt kein Titelbild – vom Katalog des Projekts geholt."))
+            }
         }
         try toolchain.prepare(recipe: recipe, store: store)
     }

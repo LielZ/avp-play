@@ -6,8 +6,7 @@ import SwiftUI
 /// danach, Favoriten, und die Rückmeldung an das Projekt.
 extension AppModel {
     var catalogClient: CatalogClient {
-        if let custom = ProcessInfo.processInfo.environment["AVPPLAY_CATALOG"], let url = URL(string: custom) { return CatalogClient(base: url) }
-        return CatalogClient()
+        CatalogClient.configured
     }
 
     var draftsDirectory: URL { DataLocation.base.appendingPathComponent("drafts", isDirectory: true) }
