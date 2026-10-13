@@ -111,6 +111,7 @@ recipes in [`recipes/`](recipes) are:
 | TRIANGLE STRATEGY | Meta Store | about 7.5 GB; its mixed-reality mode works – your room shows around the playing field; runs with a fix a user sent in |
 | Demeo | Meta Store | about 4.3 GB; its mixed-reality mode works – your room shows around the board; it cannot sign in to its maker's account service (that needs Meta's own sign-in proof) and plays with a local player, whose name you set in the start window; playing online with others has not been tried |
 | Vampire: The Masquerade – Justice | Meta Store | about 7 GB |
+| Red Matter 2 | Meta Store | about 9 GB; changes its picture's resolution with the load |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |
 | Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German; from toolchain 379 the eyes of characters no longer flash in solid colours |

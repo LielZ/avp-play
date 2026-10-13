@@ -1,0 +1,68 @@
+{
+ "files": [
+  {
+   "dest": "",
+   "id": "6922963004432830",
+   "localName": "redmatter2.apk",
+   "name": "HYPNOS-Android-Shipping-arm64.apk",
+   "required": true,
+   "role": "apk",
+   "size": 65838619,
+   "sha256": "c46aa821b2c839539e630bc68e2b84a021ec03d8fbabf03af947931606c5883b"
+  },
+  {
+   "dest": "@obb",
+   "id": "6922911514437979",
+   "name": "main.75.com.VerticalRobot.RedMatter2.obb",
+   "required": true,
+   "role": "main-obb",
+   "size": 2895297357,
+   "sha256": "3df283bddd80f799a425e0d88c52a4ab8cadde3394c8ce888e193ce5ed63697e"
+  },
+  {
+   "dest": "android-files/Android/obb/com.VerticalRobot.RedMatter2",
+   "id": "6922961191099678",
+   "name": "patch.0.com.VerticalRobot.RedMatter2.obb",
+   "required": true,
+   "role": "content-bundle",
+   "size": 3204169655,
+   "sha256": "649b13b87551c873eeb7aaa8383e83012d68f1091cb62ba4567b986f8a712dbd"
+  },
+  {
+   "dest": "android-files/Android/obb/com.VerticalRobot.RedMatter2",
+   "id": "6922934601102337",
+   "name": "overflow1.com.VerticalRobot.RedMatter2.obb",
+   "required": true,
+   "role": "content-bundle",
+   "size": 2779848053,
+   "sha256": "53110ff88b64f08a4db9efe54ac065e6f4463ac721ba152759d116630d5b0ec0"
+  }
+ ],
+ "id": "store-3682089508520212",
+ "package": "com.VerticalRobot.RedMatter2",
+ "schema": 1,
+ "status": {
+  "playability": "verified",
+  "download": "proven",
+  "notes": [
+   {
+    "en": "Marked as verified by the project on 2026-10-13. File list as Meta's tool reports it for this build; 4 of 4 checksums recorded from a download.",
+    "de": "Vom Projekt am 2026-10-13 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 4 von 4 Prüfsummen aus einem Download erfasst."
+   },
+   {
+    "en": "Red Matter 2. Played by the author with PlayStation VR2 Sense controllers; about 9 GB.",
+    "de": "Red Matter 2. Vom Autor mit PlayStation-VR2-Sense-Controllern gespielt; etwa 9 GB."
+   }
+  ]
+ },
+ "store": {
+  "appId": "3682089508520212"
+ },
+ "title": "Red Matter 2",
+ "toolchain": {
+  "minCommit": "4d51ba2",
+  "target": "redmatter2"
+ },
+ "versionCode": 75,
+ "versionName": "1.0.021"
+}
