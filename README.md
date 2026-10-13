@@ -41,12 +41,16 @@ follow once Setup is complete, without downloading again.
 Every installed game opens with the same start window: its picture, its name, **Start** and **Settings**.
 Settings holds the picture's dials – foveated rendering, resolution, and edge smoothing where a game can take
 it: for a Vulkan game that smooths its edges by itself with fewer than four samples the choice appears after the
-game has run once. Under *Advanced*, *Display output* says how finely the finished picture is put on the display;
+game has run once. A Vulkan game also gets *Foveated rendering* as a choice of four (Off, Light, Medium, Strong)
+once it has run: the edge of the picture is drawn more coarsely, the middle stays as it is. Under *Advanced*,
+*Display output* says how finely the finished picture is put on the display;
 it starts at *Light*, which leaves the graphics chip more time for the game. *Frame rate* offers *Up to 100*, the
 default, and *Up to 120*, which is smoother where the game manages it and the Vision Pro's display can do it; when
 a game cannot keep up, the Vision Pro halves the rate for a while (100 to 50, 120 to 60). Mixed-reality games have
 no such choice: their room shows only in the space that runs at up to 100. Where a game shows a player name it
-takes from the headset's account and cannot change itself, Settings has a *Player name* field for it.
+takes from the headset's account and cannot change itself, Settings has a *Player name* field for it. *Advanced*
+› *Test* holds switches for behaviour that is built in but not the default (for instance the sound block size from
+before toolchain 440); each one applies from the next start.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -89,13 +93,13 @@ recipes in [`recipes/`](recipes) are:
 | Game | Source | Notes |
 |---|---|---|
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick; the first start compiles shaders for several minutes, on the game's own screen |
-| Batman: Arkham Shadow | Meta Store | optional voice languages |
+| Batman: Arkham Shadow | Meta Store | optional voice languages; from toolchain 440 drawn at 4608 pixels an eye and full resolution with foveated rendering at *Strong* (before: 3072 at 70 %) – both are settings in the game's start window, and a copy installed earlier takes the new defaults once |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
 | Moss | Meta Store | |
 | Walkabout Mini Golf | Meta Store or Steam | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes. If you bought it on Steam instead, choose **Purchased from: Steam** on its page: the app then fetches the Android build Steam ships (for Steam Frame) from your Steam account and unlocks the add-ons Steam confirms for it. No older versions for the Steam copy |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network; asks for the local network when it opens – allow it, or the PC waits for a connection (before toolchain 380 a new install was never asked); from 380 its requests to Steam's servers get through and its start window closes once the stream is up, thanks to fixes a user sent in |
-| Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes; edge smoothing at 4x by default (a setting in the game's start window) |
+| Marvel's Deadpool VR | Meta Store | about 51 GB; the first start compiles shaders for several minutes; edge smoothing at 4x and, from toolchain 440, foveated rendering at *Medium* by default (settings in the game's start window) |
 | Alien: Rogue Incursion | Meta Store | about 14 GB; lowers its own resolution a little under load; loading screens flicker |
 | Assassin's Creed Nexus VR | Meta Store | about 29 GB; edges shimmer somewhat, passthrough is not supported |
 | Eye of the Temple | Meta Store | the whip is drawn thanks to a fix a user sent in |
@@ -240,6 +244,16 @@ source together with prebuilt ANGLE and MoltenVK libraries and their licence tex
 The fork is also a repository: [myMartek/Klepton](https://github.com/myMartek/Klepton), branch `avp-play`, with one
 commit per toolchain that shipped with a release (tagged `toolchain-N`). Changes to the runtime are welcome there
 as pull requests.
+
+## Thanks to rebelancap
+
+[rebelancap](https://github.com/rebelancap) keeps a Klepton fork of their own and offered its fixes to this one
+([issue 16](https://github.com/myMartek/avp-play/issues/16)). From toolchain 440 a large part of them is in: fixed
+foveated rendering for Vulkan games, a loader and a translator that cope with very large Unreal libraries, a wider
+Android and Unreal surface for games not seen here yet, fixes to the OpenGL path, controller haptics that no longer
+run on the thread that draws, and sound handed over in blocks of 256 frames. What changes how a game already listed
+here behaves is a switch under *Test* until it has been seen on a headset. The rest of the fork's work is to follow.
+Thank you.
 
 ## Thanks to Glovebox
 
