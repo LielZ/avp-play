@@ -50,7 +50,8 @@ a game cannot keep up, the Vision Pro halves the rate for a while (100 to 50, 12
 no such choice: their room shows only in the space that runs at up to 100. Where a game shows a player name it
 takes from the headset's account and cannot change itself, Settings has a *Player name* field for it. *Advanced*
 › *Test* holds switches for behaviour that is built in but not the default (for instance the sound block size from
-before toolchain 478); each one applies from the next start.
+before toolchain 478, or – from toolchain 493 – one head pose for a whole frame of a game that talks to Meta's own
+interface); each one applies from the next start.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -99,7 +100,7 @@ recipes in [`recipes/`](recipes) are:
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick; the first start compiles shaders for several minutes, on the game's own screen |
 | Batman: Arkham Shadow | Meta Store | optional voice languages; from toolchain 478 drawn at 4608 pixels an eye and full resolution with foveated rendering at *Strong* (before: 3072 at 70 %) – both are settings in the game's start window, and a copy installed earlier takes the new defaults once |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
-| Moss | Meta Store | from toolchain 485 drawn at the display's own resolution (4608 pixels an eye) with foveated rendering at *Strong*, 16x anisotropic filtering and a frame on every second refresh of the display (an even 60 of 120); before, it ran at about 45 frames a second. A copy installed earlier takes the new picture once |
+| Moss | Meta Store or Steam | from toolchain 485 drawn at the display's own resolution (4608 pixels an eye) with foveated rendering at *Strong*, 16x anisotropic filtering and a frame on every second refresh of the display (an even 60 of 120); before, it ran at about 45 frames a second. A copy installed earlier takes the new picture once. If you bought it on Steam instead, choose **Purchased from: Steam** on its page (from toolchain 493): the app fetches the Android build Steam ships (for Steam Frame, about 2.7 GB) from your Steam account; jump is Cross, attack is Circle or Square. No older versions for the Steam copy, and its saved games are separate |
 | Walkabout Mini Golf | Meta Store or Steam | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes. If you bought it on Steam instead, choose **Purchased from: Steam** on its page: the app then fetches the Android build Steam ships (for Steam Frame) from your Steam account and unlocks the add-ons Steam confirms for it. No older versions for the Steam copy |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network; asks for the local network when it opens – allow it, or the PC waits for a connection (before toolchain 380 a new install was never asked); from 380 its requests to Steam's servers get through and its start window closes once the stream is up, thanks to fixes a user sent in |
@@ -161,7 +162,7 @@ their own recipe.
   Steam whether your account owns the game, and Steam itself only hands out what it does. You do not need Steam
   installed. Valve ships SteamCMD as an Intel program, so a Mac that has never run one needs Apple's Rosetta once;
   the Setup page says so and installs it at the click of a button.
-- **A game bought on Steam instead of at Meta** (Walkabout Mini Golf for now). When you open such a game for the
+- **A game bought on Steam instead of at Meta** (Walkabout Mini Golf and, from toolchain 493, Moss). When you open such a game for the
   first time, or click "Check Purchase", the app asks Meta first and then Steam. Found at Meta: it stays with
   Meta. Found only on Steam: it switches to Steam by itself. Found nowhere: it stays with Meta. You can also choose
   yourself under "Purchased from". The two copies are different builds with saves of their own; the app does not
