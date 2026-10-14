@@ -128,6 +128,7 @@ avpplay – command line for the AVP Play core library
              --icon <image file>     use your own app icon (takes priority over everything else)
              --no-store-art          don't fetch the cover image from the store page (the icon from the APK is used instead)
              --replace-running       install even if the game is running (it will be quit)
+             --controller-mode <standard|surreal>  initial controller mode (pair on Vision Pro)
              --experimental          build with the toolchain's new pose and audio implementations switched on from the start
                                      (they can be turned off in the game; the app's setting “Experimental” does the same)
              --addons-only           job start: only sync purchased add-on content of an installed game (no build, no --team)
@@ -190,6 +191,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
              --no-store-art          kein Titelbild von der Store-Seite holen (dann Icon aus dem APK)
              --replace-running       auch installieren, wenn das Spiel gerade läuft (es wird dabei beendet)
              --restore-saves         nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat
+             --controller-mode <standard|surreal>  anfänglicher Controllermodus (auf Vision Pro koppeln)
              --experimental          mit von Anfang an eingeschalteter neuer Pose- und Audio-Implementierung der Toolchain bauen
                                      (im Spiel abschaltbar; die Einstellung „Experimentell“ des Programms tut dasselbe)
              --addons-only           job start: nur gekaufte Zusatzinhalte eines installierten Spiels abgleichen (kein Bau, kein --team)
@@ -207,7 +209,7 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 }
 
 let valued: Set<String> = ["account", "steam-account", "source", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
-                           "team", "device", "bundle-id", "toolchain", "icon", "tool", "jobs", "toolchains", "saves"]
+                           "team", "device", "bundle-id", "toolchain", "controller-mode", "icon", "tool", "jobs", "toolchains", "saves"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
 OtherSources.use(recipes: recipesDirectory(o))
@@ -286,6 +288,12 @@ func installRequest(_ o: Options, recipe id: String? = nil) -> InstallRequest {
     if o.flags.contains("replace-running") { request.replaceRunning = true }
     if o.flags.contains("restore-saves") { request.restoreSaves = true }
     if o.flags.contains("experimental") { request.experimental = true }
+    if let value = o.value("controller-mode") {
+        guard let mode = ControllerMode(rawValue: value) else {
+            fail(L("--controller-mode must be standard or surreal", "--controller-mode muss standard oder surreal sein"))
+        }
+        request.controllerMode = mode
+    }
     request.interval = Double(o.value("interval") ?? "") ?? 0
     return request
 }

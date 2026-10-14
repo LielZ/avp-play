@@ -222,6 +222,8 @@ final class AppModel: ObservableObject {
     @Published var latestChoices = StoreUpdate.Choices.load()
     /// Ältere Toolchains von selbst entfernen, sobald eine neuere installiert ist und nichts mehr mit ihnen baut.
     @AppStorage("autoRemoveOldToolchains") var autoRemoveOldToolchains = true
+    /// Initial controller mode for newly built games; the headset preference wins later.
+    @AppStorage(ControllerMode.preferenceKey) var controllerMode: ControllerMode = .standard
     /// Experimentell: In jedem Spiel, das installiert oder aktualisiert wird, sind die neue Kopfposen- und die neue
     /// Audio-Implementierung der Toolchain von Anfang an eingeschaltet (`Toolchain.experimentalSwitches`) – als
     /// wären die bisherigen schon entfernt. Ein Bau, der es anders hält als diese Einstellung, gilt als
@@ -1205,6 +1207,7 @@ final class AppModel: ObservableObject {
         request.addons = addons ?? chosen.addons
         // Nur eine Installation spielt Spielstände zurück; ein Abgleich von Inhalten rührt sie nicht an.
         if steps.contains(.build) { request.restoreSaves = chosen.restoreSaves ?? true }
+        if steps.contains(.build) { request.controllerMode = controllerMode }
         // Die experimentelle Einstellung gilt für jeden Bau, den dieses Programm anstößt.
         if steps.contains(.build), experimentalImplementations { request.experimental = true }
         // Ein eigenes Präfix oder das eines kostenlosen Teams: dann steht die Kennung im Auftrag.
