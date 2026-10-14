@@ -226,6 +226,9 @@ public enum Renewal {
             request.resign = true
             request.storeArt = false
             request.addons = false
+            // Ein neu signierter Bau bleibt, was er war: Hatte er die experimentellen Implementierungen an, dann
+            // auch danach – das Erneuern soll an einem Spiel nichts ändern außer der Frist.
+            if app.bundleVersion.flatMap(AppStamp.parse)?.experimental == true { request.experimental = true }
             let installer = Installer(recipe: recipe, request: request, store: store, report: { log("  " + $0) })
             do {
                 try await installer.perform(.build)

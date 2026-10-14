@@ -168,6 +168,52 @@ final class ToolchainChoiceTests: XCTestCase {
         XCTAssertEqual(status("1").onDevice, .unstamped(stamp: "1.0 (1)"))
     }
 
+    // MARK: Die experimentelle Einstellung
+
+    func testTheStampCarriesTheExperimentalBuild() {
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, experimental: true), "7.4.2")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, modified: true, experimental: true), "7.4.3")
+        XCTAssertEqual(AppStamp.parse("7.4.2"), .init(versionCode: 7, toolchain: 4, modified: false, experimental: true))
+        XCTAssertEqual(AppStamp.parse("7.4.3"), .init(versionCode: 7, toolchain: 4, modified: true, experimental: true))
+        XCTAssertEqual(AppStamp.parse("7.4.1")?.experimental, false)
+        XCTAssertEqual(AppStamp.parse("7.4")?.experimental, false)
+        // Eine dritte Zahl, die dieses Werkzeug nicht schreibt, sagt nichts – der Bau bleibt aber erkannt.
+        XCTAssertEqual(AppStamp.parse("7.4.9"), .init(versionCode: 7, toolchain: 4, modified: false, experimental: false))
+    }
+
+    func testABuildThatDiffersFromTheExperimentalSettingCanBeUpdated() {
+        let store = ContentStore(root: temp())
+        let bundle = Toolchain.bundleId(target: "moss", prefix: "com.example")
+        func status(_ installed: String, experimental: Bool?, pin: ToolchainChoices.Pin? = nil) -> GameStatus.OnDevice {
+            GameStatus.of(recipe: recipe(), store: store,
+                          apps: [InstalledApp(bundleIdentifier: bundle, name: "Moss", version: "1.0", bundleVersion: installed)],
+                          toolchainVersion: 4, pin: pin, bundlePrefix: "com.example", experimental: experimental).onDevice
+        }
+        // Einstellung an: Ein Bau mit der neuesten Toolchain, aber ohne die Schalter, ist nicht mehr aktuell …
+        XCTAssertEqual(status("7.4", experimental: true), .olderToolchain(stamp: "1.0 (7.4)"))
+        XCTAssertEqual(status("7.4.2", experimental: true), .current(stamp: "1.0 (7.4.2)"))
+        // … und nach dem Ausschalten gilt dasselbe andersherum.
+        XCTAssertEqual(status("7.4.2", experimental: false), .olderToolchain(stamp: "1.0 (7.4.2)"))
+        XCTAssertEqual(status("7.4", experimental: false), .current(stamp: "1.0 (7.4)"))
+        // Ohne Vergleich (keine Toolchain, die es kann) ändert sich nichts am bisherigen Urteil.
+        XCTAssertEqual(status("7.4.2", experimental: nil), .current(stamp: "1.0 (7.4.2)"))
+        XCTAssertEqual(status("7.3.2", experimental: nil), .olderToolchain(stamp: "1.0 (7.3.2)"))
+        // Ein Spiel mit eigens gewählter Toolchain bleibt, wie es ist.
+        let pin = ToolchainChoices.Pin(version: 4, commit: "ddddddd")
+        XCTAssertEqual(status("7.4", experimental: true, pin: pin), .current(stamp: "1.0 (7.4)"))
+        XCTAssertEqual(status("7.4.2", experimental: false, pin: pin), .current(stamp: "1.0 (7.4.2)"))
+    }
+
+    func testAnInstallRequestWithoutTheFieldIsNotExperimental() throws {
+        // Aufträge, die vor dieser Einstellung gespeichert wurden, haben das Feld nicht.
+        var request = InstallRequest(toolchain: "/tmp/t")
+        let old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        XCTAssertNil(old?["experimental"])
+        XCTAssertNil(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).experimental)
+        request.experimental = true
+        XCTAssertEqual(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).experimental, true)
+    }
+
     // MARK: Was zur Wahl steht
 
     func testOptionsOfferOnlyWhatCanBuildTheRecipe() throws {

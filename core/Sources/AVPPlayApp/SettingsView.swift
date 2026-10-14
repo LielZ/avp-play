@@ -137,6 +137,22 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section(L("Experimental", "Experimentell")) {
+                Toggle(L("Experimental: switch on the new pose and audio implementations automatically when installing",
+                         "Experimentell: Automatisch die neue Pose- und Audio-Implementierung bei Installation aktivieren"),
+                       isOn: Binding(get: { model.experimentalImplementations },
+                                     set: { model.experimentalImplementations = $0; model.refresh() }))
+                Text(L("The toolchain carries a second implementation for two things every game runs on – the head pose a game gets for a frame, and everything between a game's sound and the output – as test switches that are normally off. With this on, every game you install or update has both switched on from the start, as if the old ones were gone; in a game they can still be turned off under Settings › Advanced › Test. Games that are already installed then show “Update available”: “Update All” on the Games page rebuilds them, and the same again after you turn this off. Saved games and data are kept. A game with a toolchain of its own choosing is left as it is.",
+                       "Die Toolchain bringt für zwei Dinge, auf denen jedes Spiel läuft, eine zweite Implementierung mit – die Kopfpose, die ein Spiel für einen Frame bekommt, und alles zwischen dem Ton eines Spiels und der Ausgabe –, als Test-Schalter, die normalerweise aus sind. Hiermit sind in jedem Spiel, das du installierst oder aktualisierst, beide von Anfang an eingeschaltet, als wären die bisherigen schon entfernt; im Spiel lassen sie sich unter Einstellungen › Erweitert › Test weiterhin ausschalten. Schon installierte Spiele zeigen dann „Aktualisierung möglich“: „Alle aktualisieren“ auf der Seite Spiele baut sie neu, und ebenso, nachdem du das hier wieder ausschaltest. Spielstände und Daten bleiben. Ein Spiel mit eigens gewählter Toolchain bleibt, wie es ist."))
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.toolchain != nil, model.experimentalExpected == nil {
+                    Text(L("The installed toolchain cannot do this yet; it takes effect with a newer one.",
+                           "Die installierte Toolchain kann das noch nicht; es wirkt mit einer neueren."))
+                        .font(.callout).foregroundStyle(.orange)
+                }
+            }
+
             Section(L("Advanced", "Erweitert")) {
                 LabeledContent(L("App identifier prefix", "Präfix der App-Kennung")) {
                     TextField("", text: $prefixDraft, prompt: Text(Toolchain.defaultBundlePrefix()))

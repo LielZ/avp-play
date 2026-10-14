@@ -50,8 +50,29 @@ a game cannot keep up, the Vision Pro halves the rate for a while (100 to 50, 12
 no such choice: their room shows only in the space that runs at up to 100. Where a game shows a player name it
 takes from the headset's account and cannot change itself, Settings has a *Player name* field for it. *Advanced*
 › *Test* holds switches for behaviour that is built in but not the default (for instance the sound block size from
-before toolchain 478, or – from toolchain 493 – one head pose for a whole frame of a game that talks to Meta's own
-interface); each one applies from the next start.
+before toolchain 478, – from toolchain 507 – one head pose for a whole frame of a game that talks to Meta's own
+interface, or – from toolchain 507 – a second implementation of everything between a game's sound interface and
+the output, *Sound: the new audio path*); each one applies from the next start.
+
+**How a game is running** (from toolchain 507). In every game, hold **Create** and **Options** on the controllers
+together for a second: a small panel appears just above the middle of the view, and the same again puts it away.
+It shows the last second in numbers – frames a second and the rate the display runs at, shaders that had to be
+compiled and ones that were only fetched, how busy the graphics chip is and how long it works on one frame of the
+game, the processor's load and its busiest thread, memory, heat, the size of the picture – and the last minute as
+three graphs: frame rate, load, shaders. A dip in the frame rate with a red bar under it was a shader being
+compiled. The panel is in English and is drawn into the game's picture, so it is as sharp as *Display output*
+makes that. Nothing is measured before the panel is first shown. *Advanced* › *Test* › *Show performance in the
+headset from the start* has it there when the game opens. So that a game does not open its menu along with the
+panel, one of the two buttons alone reaches the game a quarter of a second after you press it.
+
+**Trying the new pose and audio implementations in every game** (from version 1.1.15 with toolchain 507). The
+toolchain carries a second implementation of two things every game runs on – the head pose a game gets for a frame,
+and everything between a game's sound and the output – as test switches that are off. *Settings › Experimental*
+in this app has one switch for both: with it on, every game you install or update has them switched on from the
+start, as if the old ones were gone; in a game each can still be turned off under *Advanced › Test*. Games that
+are already installed then show "Update available", and **Update All** on the Games page rebuilds them – the same
+again after you turn the setting off. Saved games and data are kept. A game with a toolchain of its own choosing
+is left as it is, and renewing a signature keeps what a build had.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -100,7 +121,7 @@ recipes in [`recipes/`](recipes) are:
 | Asgard's Wrath 2 | Meta Store | text and voices follow the headset's language; voice packs are an optional tick; the first start compiles shaders for several minutes, on the game's own screen |
 | Batman: Arkham Shadow | Meta Store | optional voice languages; from toolchain 478 drawn at 4608 pixels an eye and full resolution with foveated rendering at *Strong* (before: 3072 at 70 %) – both are settings in the game's start window, and a copy installed earlier takes the new defaults once |
 | Beat Saber | Meta Store | purchased song packs are downloaded and unlocked; the current version (1.45) is drawn at the display's full resolution with foveated rendering (on by default); edge smoothing (2x/4x) is a setting in the game's start window, off by default |
-| Moss | Meta Store or Steam | from toolchain 485 drawn at the display's own resolution (4608 pixels an eye) with foveated rendering at *Strong*, 16x anisotropic filtering and a frame on every second refresh of the display (an even 60 of 120); before, it ran at about 45 frames a second. A copy installed earlier takes the new picture once. If you bought it on Steam instead, choose **Purchased from: Steam** on its page (from toolchain 493): the app fetches the Android build Steam ships (for Steam Frame, about 2.7 GB) from your Steam account; jump is Cross, attack is Circle or Square. No older versions for the Steam copy, and its saved games are separate |
+| Moss | Meta Store or Steam | from toolchain 485 drawn at the display's own resolution (4608 pixels an eye) with foveated rendering at *Strong*, 16x anisotropic filtering and a frame on every second refresh of the display (an even 60 of 120); before, it ran at about 45 frames a second. A copy installed earlier takes the new picture once. If you bought it on Steam instead, choose **Purchased from: Steam** on its page (from toolchain 507): the app fetches the Android build Steam ships (for Steam Frame, about 2.7 GB) from your Steam account; jump is Cross, attack is Circle or Square. No older versions for the Steam copy, and its saved games are separate |
 | Walkabout Mini Golf | Meta Store or Steam | purchased courses and content packs are unlocked; the first start compiles shaders for a few minutes. If you bought it on Steam instead, choose **Purchased from: Steam** on its page: the app then fetches the Android build Steam ships (for Steam Frame) from your Steam account and unlocks the add-ons Steam confirms for it. No older versions for the Steam copy |
 | SUPERHOT VR | Meta Store | |
 | Steam Link | Meta Store | streams SteamVR from a PC on your network; asks for the local network when it opens – allow it, or the PC waits for a connection (before toolchain 380 a new install was never asked); from 380 its requests to Steam's servers get through and its start window closes once the stream is up, thanks to fixes a user sent in |
@@ -118,11 +139,12 @@ recipes in [`recipes/`](recipes) are:
 | Vampire: The Masquerade – Justice | Meta Store | about 7 GB |
 | Red Matter 2 | Meta Store | about 9 GB; changes its picture's resolution with the load |
 | Tetris Effect: Connected | Meta Store | about 2.2 GB; drawn at the display's own resolution (a setting in the game's start window) |
+| Pistol Whip | Meta Store | about 1.6 GB; runs with fixes users sent in |
 | Counter-Strike (Team Beef's CSVR) | free port + your own Counter-Strike files | the game data is fetched from your Steam account; your own servers can be listed per game |
 | Doom 3 (Doom3Quest) | free port + your own Doom 3 files | `pak000`–`pak008.pk4` from your copy of Doom 3 – fetched from your Steam account, or from a folder you choose |
 | Half-Life: Alyx | your own Steam copy (Linux build) | the game (about 73 GB) is fetched from your Steam account; the app downloads Steam Linux Runtime (from Valve) and xrizer (from this repository) itself; a German fan voice-over from the game's Steam Workshop is an optional tick, and the game's start window on the Vision Pro switches between English and German; from toolchain 478 the eyes of characters no longer flash in solid colours, and on the Vision Pro with the M5 the presets *Balanced* (the default) and *Sharp* in the game's start window draw the largest picture with detailed textures at an even half of the display rate (50 pictures a second), *Balanced* with strong foveated rendering and without bloom and ambient occlusion – found by play on one headset; how warm it gets over a long session is not measured yet. Frame cadence, effects and texture memory are settings under *Custom*, a frame-rate readout can be switched on, and a copy installed earlier keeps a custom set as it was. On the first Vision Pro (M2) the two presets are the same with the picture one size smaller; nobody has run them there yet |
 
-These twenty-one are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
+These twenty-two are marked **Verified**: the project has tested them on a Vision Pro. The app also lists every other
 Quest title from the Meta Store – some 17,000, loaded page by page as you scroll. What you see on each is a label:
 
 | Label | Meaning |
@@ -145,7 +167,7 @@ while fixing the game, shown as "(modified)". The game then stays on that toolch
 one, when the game is updated and when its signature is renewed. The app removes older toolchains by itself to
 save disk space; one that is chosen for a game stays, and a switch in Settings turns the tidying off.
 
-All twenty-one were installed with this app on the author's headset. "Community Verified" means exactly what it
+All twenty-two were installed with this app on the author's headset. "Community Verified" means exactly what it
 says: reports from users, not a guarantee. A recipe is tied to one build of a game; other builds need
 their own recipe.
 
@@ -162,7 +184,7 @@ their own recipe.
   Steam whether your account owns the game, and Steam itself only hands out what it does. You do not need Steam
   installed. Valve ships SteamCMD as an Intel program, so a Mac that has never run one needs Apple's Rosetta once;
   the Setup page says so and installs it at the click of a button.
-- **A game bought on Steam instead of at Meta** (Walkabout Mini Golf and, from toolchain 493, Moss). When you open such a game for the
+- **A game bought on Steam instead of at Meta** (Walkabout Mini Golf and, from toolchain 507, Moss). When you open such a game for the
   first time, or click "Check Purchase", the app asks Meta first and then Steam. Found at Meta: it stays with
   Meta. Found only on Steam: it switches to Steam by itself. Found nowhere: it stays with Meta. You can also choose
   yourself under "Purchased from". The two copies are different builds with saves of their own; the app does not
@@ -264,8 +286,9 @@ foveated rendering for Vulkan games, a loader and a translator that cope with ve
 Android and Unreal surface for games not seen here yet, fixes to the OpenGL path, controller haptics that no longer
 run on the thread that draws, sound handed over in blocks of 256 frames, sound that stops at once when the Digital
 Crown is pressed, and answers to some 160 calls of Meta's headset interface that stopped a game here before. What changes how a game already listed
-here behaves is a switch under *Test* until it has been seen on a headset. The rest of the fork's work is to follow.
-Thank you.
+here behaves is a switch under *Test* until it has been seen on a headset. From toolchain 507 the fork's audio path
+is in whole, beside the one that has shipped: the switch *Sound: the new audio path* picks it for a game, and it is
+off unless you turn it on. The rest of the fork's work on head poses and the compositor is to follow. Thank you.
 
 ## Thanks to Glovebox
 

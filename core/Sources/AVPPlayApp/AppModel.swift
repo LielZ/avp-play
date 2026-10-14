@@ -222,6 +222,18 @@ final class AppModel: ObservableObject {
     @Published var latestChoices = StoreUpdate.Choices.load()
     /// Ältere Toolchains von selbst entfernen, sobald eine neuere installiert ist und nichts mehr mit ihnen baut.
     @AppStorage("autoRemoveOldToolchains") var autoRemoveOldToolchains = true
+    /// Experimentell: In jedem Spiel, das installiert oder aktualisiert wird, sind die neue Kopfposen- und die neue
+    /// Audio-Implementierung der Toolchain von Anfang an eingeschaltet (`Toolchain.experimentalSwitches`) – als
+    /// wären die bisherigen schon entfernt. Ein Bau, der es anders hält als diese Einstellung, gilt als
+    /// aktualisierbar, sodass „Alle aktualisieren“ nach dem Umlegen alle installierten Spiele umstellt.
+    @AppStorage(AppModel.experimentalKey) var experimentalImplementations = false
+    nonisolated static let experimentalKey = "experimentalImplementations"
+    /// Was `GameStatus` von einem aktuellen Bau erwartet: die Einstellung, wo die neueste Toolchain sie umsetzen
+    /// kann. Liest die Einstellung selbst, weil die Bestandsaufnahme nicht auf dem Hauptthread läuft.
+    nonisolated static func experimentalExpected(toolchain: Toolchain?) -> Bool? {
+        guard let toolchain, toolchain.supportsExperimental else { return nil }
+        return UserDefaults.standard.bool(forKey: experimentalKey)
+    }
     /// Für welche Spiele eine andere Toolchain als die neueste gewählt ist (siehe `ToolchainChoices`).
     @Published var toolchainChoices = ToolchainChoices.load()
     /// Die Pakete früherer Veröffentlichungen auf GitHub; `nil`, solange niemand danach gefragt hat.
@@ -236,6 +248,9 @@ final class AppModel: ObservableObject {
     /// Was das Gerät zuletzt als installiert gemeldet hat, und ab welcher Toolchain-Nummer ein Bau aktuell ist.
     var installedApps: [InstalledApp]?
     var toolchainRevision: Int?
+    /// Was ein aktueller Bau von der experimentellen Einstellung tragen soll; `nil`, solange keine Toolchain da
+    /// ist, die das kann – dann wird nicht verglichen.
+    var experimentalExpected: Bool?
     /// Wie weit das Kopieren aufs Gerät im laufenden Auftrag ist.
     @Published var copyProgress: [String: InstallProgress] = [:]
     /// Eine neuere veröffentlichte Fassung, falls es eine gibt.
@@ -372,7 +387,7 @@ final class AppModel: ObservableObject {
         // (Gerät fragen, jeden Ordner im Bestand zählen) dauert Sekunden und ändert an den anderen Spielen nichts.
         let id = game.id, catalog = game.catalog
         let paths = paths, apps = installedApps, revision = toolchainRevision, prefix = bundlePrefix, drafts = draftsDirectory
-        let pin = toolchainChoices.games[id]
+        let pin = toolchainChoices.games[id], experimental = experimentalExpected
         Task.detached(priority: .userInitiated) {
             var fresh: Game?
             if let recipes = paths.recipes {
@@ -381,7 +396,8 @@ final class AppModel: ObservableObject {
                     let variants = store.loadVariants(), sources = store.loadSources()
                     let active = StoreUpdate.resolve([tested], variants: variants, sources: sources, drafts: drafts, choices: choices).first ?? tested
                     fresh = Probe.game(active, draft: false, tested: tested, variants: variants, sources: sources, paths: paths,
-                                       apps: apps, toolchainRevision: revision, pin: pin, bundlePrefix: prefix)
+                                       apps: apps, toolchainRevision: revision, pin: pin, bundlePrefix: prefix,
+                                       experimental: experimental)
                     fresh?.catalog = catalog
                 }
             }
@@ -799,6 +815,7 @@ final class AppModel: ObservableObject {
         // Vor den Spielen: daraus wird die Liste aller Spiele gebaut, und die braucht den neuen Stand des Geräts.
         installedApps = s.apps
         toolchainRevision = s.toolchainRevision
+        experimentalExpected = s.experimentalExpected
         toolchainChoices = s.toolchainChoices
         games = s.games
         loadOwnCatalogEntries()
@@ -1188,6 +1205,8 @@ final class AppModel: ObservableObject {
         request.addons = addons ?? chosen.addons
         // Nur eine Installation spielt Spielstände zurück; ein Abgleich von Inhalten rührt sie nicht an.
         if steps.contains(.build) { request.restoreSaves = chosen.restoreSaves ?? true }
+        // Die experimentelle Einstellung gilt für jeden Bau, den dieses Programm anstößt.
+        if steps.contains(.build), experimentalImplementations { request.experimental = true }
         // Ein eigenes Präfix oder das eines kostenlosen Teams: dann steht die Kennung im Auftrag.
         let prefix = bundlePrefix
         if prefix != Toolchain.defaultBundlePrefix() { request.bundleId = "\(prefix).\(game.recipe.toolchain.target)" }

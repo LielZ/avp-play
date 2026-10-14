@@ -128,6 +128,8 @@ avpplay – command line for the AVP Play core library
              --icon <image file>     use your own app icon (takes priority over everything else)
              --no-store-art          don't fetch the cover image from the store page (the icon from the APK is used instead)
              --replace-running       install even if the game is running (it will be quit)
+             --experimental          build with the toolchain's new pose and audio implementations switched on from the start
+                                     (they can be turned off in the game; the app's setting “Experimental” does the same)
              --addons-only           job start: only sync purchased add-on content of an installed game (no build, no --team)
              --download-only         job start: only download the files (needs no Xcode, toolchain, --team or device)
              --build-only            job start: check, download, build and install the app, but do not copy the game data yet
@@ -188,6 +190,8 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
              --no-store-art          kein Titelbild von der Store-Seite holen (dann Icon aus dem APK)
              --replace-running       auch installieren, wenn das Spiel gerade läuft (es wird dabei beendet)
              --restore-saves         nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat
+             --experimental          mit von Anfang an eingeschalteter neuer Pose- und Audio-Implementierung der Toolchain bauen
+                                     (im Spiel abschaltbar; die Einstellung „Experimentell“ des Programms tut dasselbe)
              --addons-only           job start: nur gekaufte Zusatzinhalte eines installierten Spiels abgleichen (kein Bau, kein --team)
              --download-only         job start: nur die Dateien laden (braucht weder Xcode noch Toolchain, --team oder Gerät)
              --build-only            job start: prüfen, laden, bauen und die App installieren, aber die Spieldaten noch nicht kopieren
@@ -281,6 +285,7 @@ func installRequest(_ o: Options, recipe id: String? = nil) -> InstallRequest {
     request.storeArt = !o.flags.contains("no-store-art")
     if o.flags.contains("replace-running") { request.replaceRunning = true }
     if o.flags.contains("restore-saves") { request.restoreSaves = true }
+    if o.flags.contains("experimental") { request.experimental = true }
     request.interval = Double(o.value("interval") ?? "") ?? 0
     return request
 }

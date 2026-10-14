@@ -387,10 +387,13 @@ public enum AppStamp {
         return "1.0"
     }
 
-    /// `CFBundleVersion`: Versionscode des Spiels und Nummer der Toolchain – und eine dritte Zahl 1, wenn die
-    /// Toolchain eine bearbeitete Arbeitskopie war. Mehr als drei Zahlen nimmt der Schlüssel nicht.
-    public static func build(versionCode: Int, toolchainVersion: Int, modified: Bool = false) -> String {
-        "\(max(0, min(versionCode, 999_999_999))).\(max(0, min(toolchainVersion, 999_999_999)))" + (modified ? ".1" : "")
+    /// `CFBundleVersion`: Versionscode des Spiels und Nummer der Toolchain – und eine dritte Zahl, wenn der Bau
+    /// etwas Besonderes ist: 1 für eine bearbeitete Arbeitskopie der Toolchain, 2 für einen Bau, in dem die
+    /// experimentellen Implementierungen von Anfang an eingeschaltet sind (`Toolchain.experimentalSwitches`),
+    /// 3 für beides. Mehr als drei Zahlen nimmt der Schlüssel nicht.
+    public static func build(versionCode: Int, toolchainVersion: Int, modified: Bool = false, experimental: Bool = false) -> String {
+        let extra = (modified ? 1 : 0) + (experimental ? 2 : 0)
+        return "\(max(0, min(versionCode, 999_999_999))).\(max(0, min(toolchainVersion, 999_999_999)))" + (extra > 0 ? ".\(extra)" : "")
     }
 
     /// Was ein Stempel dieses Werkzeugs über den Bau sagt.
@@ -398,6 +401,12 @@ public enum AppStamp {
         public var versionCode: Int
         public var toolchain: Int
         public var modified: Bool
+        /// Die experimentellen Implementierungen sind in diesem Bau von Anfang an eingeschaltet.
+        public var experimental = false
+
+        public init(versionCode: Int, toolchain: Int, modified: Bool, experimental: Bool = false) {
+            self.versionCode = versionCode; self.toolchain = toolchain; self.modified = modified; self.experimental = experimental
+        }
     }
 
     /// Liest `CFBundleVersion` einer installierten App; `nil`, wenn es kein Stempel dieses Werkzeugs ist.
@@ -405,6 +414,8 @@ public enum AppStamp {
         let parts = bundleVersion.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
         guard parts.count == 2 || parts.count == 3, let code = parts[0], let toolchain = parts[1] else { return nil }
         guard parts.count == 2 || parts[2] != nil else { return nil }
-        return Built(versionCode: code, toolchain: toolchain, modified: parts.count == 3 && parts[2] == 1)
+        // Die dritte Zahl ist eine Summe (siehe `build`); alles über 3 stammt nicht von diesem Werkzeug und sagt nichts.
+        let extra = parts.count == 3 ? parts[2] ?? 0 : 0
+        return Built(versionCode: code, toolchain: toolchain, modified: extra == 1 || extra == 3, experimental: extra == 2 || extra == 3)
     }
 }

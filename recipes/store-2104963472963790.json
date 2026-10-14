@@ -1,0 +1,50 @@
+{
+ "files": [
+  {
+   "dest": "",
+   "id": "7356039127856172",
+   "localName": "x2104963472963790.apk",
+   "name": "Pistol Whip.apk",
+   "required": true,
+   "role": "apk",
+   "size": 60565852,
+   "sha256": "972f0e0294baafb5a83c0901bfc8ba7e5d51de6de5674ded061dd0f632053497"
+  },
+  {
+   "dest": "@obb",
+   "id": "7356038197856265",
+   "name": "main.2104.com.cloudheadgames.pistolwhip.obb",
+   "required": true,
+   "role": "main-obb",
+   "size": 1551221946,
+   "sha256": "9617c5513f991cca59144cd90e245dfde2ce7ee0126a5ef1f7eb16bea35b5c14"
+  }
+ ],
+ "id": "store-2104963472963790",
+ "package": "com.cloudheadgames.pistolwhip",
+ "schema": 1,
+ "status": {
+  "playability": "verified",
+  "download": "proven",
+  "notes": [
+   {
+    "en": "Marked as verified by the project on 2026-10-14. File list as Meta's tool reports it for this build; 2 of 2 checksums recorded from a download.",
+    "de": "Vom Projekt am 2026-10-14 als geprüft markiert. Dateiliste, wie Metas Werkzeug sie für diesen Build nennt; 2 von 2 Prüfsummen aus einem Download erfasst."
+   },
+   {
+    "en": "Runs with three fixes users sent in: fix 10, which gets the game to start and draw, fix 26 for its sound and fix 27 for the way back to the menu after a run.",
+    "de": "Läuft mit drei von Nutzern eingesandten Fixes: Fix 10, mit dem das Spiel startet und zeichnet, Fix 26 für den Ton und Fix 27 für den Weg zurück ins Menü nach einem Durchgang."
+   }
+  ]
+ },
+ "store": {
+  "appId": "2104963472963790"
+ },
+ "title": "Pistol Whip",
+ "toolchain": {
+  "minCommit": "5456ccf",
+  "target": "x2104963472963790"
+ },
+ "versionCode": 2104,
+ "versionName": "1.5.65.209"
+}

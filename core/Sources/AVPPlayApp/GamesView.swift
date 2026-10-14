@@ -868,6 +868,15 @@ struct GameDetail: View {
                 return L("Installed, but not built with toolchain \(pin.name), which is chosen for this game – “Update” builds it with that one; saved games and data are kept.",
                          "Installiert, aber nicht mit Toolchain \(pin.name) gebaut, die für dieses Spiel gewählt ist – „Aktualisieren“ baut es mit ihr; Spielstände und Daten bleiben.")
             }
+            // Gleiche Toolchain, andere experimentelle Einstellung: Dann ist das der Grund, und er steht da.
+            if let built = game.status.builtWith, let wanted = model.experimentalExpected, built.experimental != wanted,
+               built.toolchain >= (model.toolchainRevision ?? 0) {
+                return wanted
+                    ? L("Installed, without the new pose and audio implementations that the experimental setting asks for – “Update” builds it with them switched on; saved games and data are kept.",
+                        "Installiert, ohne die neue Pose- und Audio-Implementierung, die die experimentelle Einstellung verlangt – „Aktualisieren“ baut es mit beiden eingeschaltet; Spielstände und Daten bleiben.")
+                    : L("Installed with the new pose and audio implementations switched on; the experimental setting is off now – “Update” builds it without them; saved games and data are kept.",
+                        "Installiert mit eingeschalteter neuer Pose- und Audio-Implementierung; die experimentelle Einstellung ist jetzt aus – „Aktualisieren“ baut es ohne sie; Spielstände und Daten bleiben.")
+            }
             if let built = game.status.builtWith, built.modified {
                 return L("Installed, built with toolchain \(Toolchain.name(version: built.toolchain, modified: true)). “Update” replaces this build with one from the newest toolchain, without the changes of the modified one (see “Toolchain” below); saved games and data are kept.",
                          "Installiert, gebaut mit Toolchain \(Toolchain.name(version: built.toolchain, modified: true)). „Aktualisieren“ ersetzt diesen Bau durch einen aus der neuesten Toolchain, ohne die Änderungen der modifizierten (siehe unten unter „Toolchain“); Spielstände und Daten bleiben.")

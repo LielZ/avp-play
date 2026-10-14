@@ -163,7 +163,8 @@ extension AppModel {
             let recipe = DraftRecipe.placeholder(game: entry)
             out.append(Game(recipe: recipe,
                             status: GameStatus.of(recipe: recipe, store: paths.store, apps: installedApps, toolchainVersion: toolchainRevision,
-                                                  pin: toolchainChoices.games[recipe.id], bundlePrefix: prefix),
+                                                  pin: toolchainChoices.games[recipe.id], bundlePrefix: prefix,
+                                                  experimental: experimentalExpected),
                             cover: nil, catalog: entry, draft: true))
         }
         allGames = out

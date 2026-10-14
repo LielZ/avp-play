@@ -48,8 +48,13 @@ public struct GameStatus: Sendable, Equatable {
     /// - Parameter bundlePrefix: das Präfix, unter dem die Spiele installiert werden; ohne Angabe das übliche.
     /// - Parameter otherSourceBuilds: die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle
     ///   installiert wäre.
+    /// - Parameter experimental: ob ein aktueller Bau die experimentellen Implementierungen von Anfang an
+    ///   eingeschaltet haben soll (die Einstellung des Programms). Ein Bau, der es anders hält, gilt dann als
+    ///   aktualisierbar – so stellt „Alle aktualisieren“ nach dem Umlegen der Einstellung alle Spiele um. `nil`:
+    ///   nicht vergleichen (keine Toolchain, die das kann, oder eine für das Spiel gewählte).
     public static func of(recipe r: Recipe, store: ContentStore, apps: [InstalledApp]?, toolchainVersion: Int?,
-                          pin: ToolchainChoices.Pin? = nil, bundlePrefix: String? = nil, otherSourceBuilds: Set<Int> = []) -> GameStatus {
+                          pin: ToolchainChoices.Pin? = nil, bundlePrefix: String? = nil, otherSourceBuilds: Set<Int> = [],
+                          experimental: Bool? = nil) -> GameStatus {
         // Was Meta diesem Konto nicht ausliefert (ein nicht gekaufter Zusatzinhalt, siehe `ContentStore.Withheld`),
         // fehlt nicht: Es wird nie geladen und steht dem Spiel nicht im Weg. Ohne das stünde bei einem Spiel wie
         // Maestro für immer „3 von 11 Dateien“, obwohl alles da ist, was dem Konto zusteht.
@@ -78,7 +83,9 @@ public struct GameStatus: Sendable, Equatable {
                    b.hasPrefix("\(r.versionCode).") {
                     builtWith = built
                     let number = built?.toolchain ?? 0
+                    let otherSetting = pin == nil && experimental.map { $0 != (built?.experimental ?? false) } ?? false
                     let outdated = pin.map { number != $0.version || built?.modified != $0.modified } ?? toolchainVersion.map { number < $0 } ?? false
+                        || otherSetting
                     onDevice = outdated ? .olderToolchain(stamp: stamp) : .current(stamp: stamp)
                 } else if let installed = built?.versionCode, otherSourceBuilds.contains(installed) {
                     onDevice = .otherSource(stamp: stamp)

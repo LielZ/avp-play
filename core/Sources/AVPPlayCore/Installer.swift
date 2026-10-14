@@ -99,6 +99,9 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     /// Die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle installiert wäre. Liegt eine davon
     /// auf dem Gerät, wird nicht darüber installiert.
     public var otherSourceBuilds: [Int]?
+    /// Die experimentellen Implementierungen (`Toolchain.experimentalSwitches`) in diesem Bau von Anfang an
+    /// einschalten. Ohne Angabe: nein.
+    public var experimental: Bool?
 
     public init(toolchain: String) { self.toolchain = toolchain }
 }
@@ -487,8 +490,17 @@ public struct Installer: Sendable {
         }
         let log = store.directory(for: recipe).appendingPathComponent(".last-build.log")
         let started = Date()
+        let experimental = request.experimental == true
+        if experimental {
+            report(toolchain.supportsExperimental
+                   ? L("Experimental: the new pose and audio implementations are on from the start in this build (they can be switched off in the game under Settings › Advanced › Test).",
+                       "Experimentell: Die neue Pose- und Audio-Implementierung sind in diesem Bau von Anfang an eingeschaltet (im Spiel abschaltbar unter Einstellungen › Erweitert › Test).")
+                   : L("Experimental: this toolchain cannot switch the new pose and audio implementations on yet; the game is built as usual.",
+                       "Experimentell: Diese Toolchain kann die neue Pose- und Audio-Implementierung noch nicht einschalten; das Spiel wird wie üblich gebaut."))
+        }
         try toolchain.buildAndInstall(recipe: recipe, team: team, device: device, bundleId: bundle, log: log,
-                                      extraEnvironment: TreeStore(store: store).toolchainEnvironment(recipe: recipe))
+                                      extraEnvironment: TreeStore(store: store).toolchainEnvironment(recipe: recipe),
+                                      experimental: experimental)
         report(String(format: L("Built and installed (%.0f s).", "Gebaut und installiert (%.0f s)."), Date().timeIntervalSince(started)))
         // Womit signiert wurde und bis wann: Daran erinnert die App rechtzeitig vor dem Ablauf.
         let record = SigningRecord(team: team, free: free, installed: Date(), expires: toolchain.signingExpiry(recipe: recipe),
