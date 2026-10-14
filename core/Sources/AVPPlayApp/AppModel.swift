@@ -1327,8 +1327,9 @@ final class AppModel: ObservableObject {
                 if line.hasPrefix("[") { self.reloadJobs() }
             }
         }
+        let metaTool = Probe.metaToolURL
         runningTask = Task.detached {
-            let installer = Installer(recipe: job.recipe, request: job.request, store: paths.store,
+            var installer = Installer(recipe: job.recipe, request: job.request, store: paths.store,
                                       progress: { p in Task { @MainActor in
                                           // Die Verbindungsart kommt einmal am Anfang; die Meldungen danach tragen sie nicht.
                                           var p = p
@@ -1336,6 +1337,7 @@ final class AppModel: ObservableObject {
                                           self.copyProgress[id] = p
                                       } },
                                       report: { feed.yield("    " + $0) })
+            installer.metaTool = metaTool
             let now = (try? Toolchain(root: URL(fileURLWithPath: job.request.toolchain)).commit()) ?? "unbekannt"
             do {
                 _ = try await JobRunner(store: paths.jobs).run(job, currentToolchain: now, log: { feed.yield($0) }) { step, _ in

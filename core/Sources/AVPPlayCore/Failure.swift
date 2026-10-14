@@ -68,7 +68,7 @@ public enum FailureKind: String, Codable, Sendable {
                 }
             case .notAToolchain, .tooOld, .signingBlocked: return .setup
             }
-        case is FetchError, is URLError: return .download
+        case is FetchError, is URLError, is ToolDownloadError: return .download
         default: return .other
         }
     }

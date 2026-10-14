@@ -46,6 +46,12 @@ func recipesDirectory(_ o: Options) -> URL {
            "Kein Rezeptordner gefunden. Mit --recipes <Ordner> angeben."))
 }
 
+/// Metas Werkzeug für den Ausweg bei HTTP 404: `--tool`, sonst die Kopie der App, sonst `~/Downloads`.
+func metaToolURL(_ o: Options) -> URL {
+    if let p = o.value("tool") { return URL(fileURLWithPath: p) }
+    return FileManager.default.fileExists(atPath: MetaTool.installedURL.path) ? MetaTool.installedURL : MetaTool.defaultURL
+}
+
 func contentStore(_ o: Options) -> ContentStore {
     if let p = o.value("store") ?? ProcessInfo.processInfo.environment["AVPPLAY_STORE"] {
         return ContentStore(root: URL(fileURLWithPath: p))
@@ -90,6 +96,7 @@ avpplay – command line for the AVP Play core library
   avpplay logout                               delete the stored Meta token
   avpplay account                              check the stored Meta token
   avpplay owns <id>                            does the account own the game?
+  avpplay files <build ID> [--details]         the files of a build (Meta's tool; its build details if the tool can't find it)
   avpplay steam setup|login <name>|logout      Valve's SteamCMD: fetch it, sign in to Steam (you type the password into Valve's tool), sign out
   avpplay steam fetch <id> --steam-account <name> [--with <file name>]   get the files a recipe needs from your own Steam purchase
   avpplay purchases <id>                       confirmed in-game purchases and the add-on content that goes with them
@@ -150,6 +157,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay logout                               hinterlegten Meta-Token löschen
   avpplay account                              hinterlegten Meta-Token prüfen
   avpplay owns <id>                            Besitzt das Konto das Spiel?
+  avpplay files <Build-ID> [--details]         die Dateien eines Builds (Metas Werkzeug; findet es ihn nicht, die Build-Details)
   avpplay steam setup|login <Name>|logout      Valves SteamCMD: holen, bei Steam anmelden (das Passwort tippst du in Valves Werkzeug), abmelden
   avpplay steam fetch <id> --steam-account <Name> [--with <Dateiname>]   die Dateien eines Rezepts aus dem eigenen Steam-Kauf holen
   avpplay purchases <id>                       bestätigte Käufe im Spiel und zugehörige Zusatzinhalte
@@ -455,6 +463,26 @@ case "owns":
     }
     catch { fail("\(error)") }
 
+case "files":
+    // Die Dateien eines Builds, wie die App sie für ein ungeprüftes Spiel nachschlägt. Mit --details nur über
+    // Metas Build-Details (MetaClient.buildFiles), ohne das Werkzeug.
+    guard o.positional.count > 1, CatalogGame.isIdentifier(o.positional[1]) else { fail(L("A build ID is missing.", "Build-Kennung fehlt.")) }
+    let (client, _) = await signedIn(o)
+    do {
+        let build = o.positional[1]
+        let files: [ListedFile]
+        if o.flags.contains("details") {
+            files = try await client.buildFiles(buildId: build)
+        } else {
+            let token = try TokenStore().read(account: o.value("account") ?? "default")
+            try MetaTool(url: metaToolURL(o)).verify()
+            files = try await MetaListing.files(buildId: build, tool: metaToolURL(o), token: token, client: client) { print($0) }
+        }
+        if files.isEmpty { print(L("No files named.", "Keine Dateien genannt.")) }
+        for f in files { print("  \(f.kind)  \(f.name)  \(f.sizeText)  \(f.id)") }
+    }
+    catch { fail("\(error)") }
+
 case "content-identity":
     // Was die Auslieferung über eine Datei sagt, ohne sie zu laden (MetaClient.identity) – zum Nachsehen.
     guard o.positional.count > 1, CatalogGame.isIdentifier(o.positional[1]) else { fail(L("A file ID is missing.", "Datei-Kennung fehlt.")) }
@@ -574,7 +602,12 @@ case "plan", "fetch":
     }
     let interval = Double(o.value("interval") ?? "") ?? 0
     // Ohne Meta-Dateien wird der Client nie benutzt; er bekommt dann auch keinen Token.
-    let fetcher = Fetcher(client: client ?? MetaClient(token: "unbenutzt"), store: store, gate: RequestGate(minInterval: .seconds(interval)))
+    var fetcher = Fetcher(client: client ?? MetaClient(token: "unbenutzt"), store: store, gate: RequestGate(minInterval: .seconds(interval)))
+    // Verweigert die direkte Adresse eine Datei des Spiels (HTTP 404), wird es einmal über Metas Werkzeug versucht.
+    if client != nil, let token = try? TokenStore().read(account: o.value("account") ?? "default"),
+       (try? MetaTool(url: metaToolURL(o)).verify()) != nil {
+        fetcher.toolFallback = MetaToolDownload(tool: metaToolURL(o), token: token)
+    }
     do {
         let summary = try await fetcher.run(plan, recipe: r) { print("  " + $0) }
         print(L("Done: \(summary.downloaded) downloaded (\(gigabytes(summary.bytes))), \(summary.kept) were already there.",
@@ -715,7 +748,8 @@ case "install", "stage":
     let copying = CopyProgressPrinter()
     var request = installRequest(o, recipe: r.id)
     request.otherSourceBuilds = otherSourceBuilds(of: r, o)
-    let installer = Installer(recipe: r, request: request, store: contentStore(o), progress: { copying.show($0) }) { print($0) }
+    var installer = Installer(recipe: r, request: request, store: contentStore(o), progress: { copying.show($0) }) { print($0) }
+    installer.metaTool = metaToolURL(o)
     do {
         for step in (command == "install" ? [.account, .build, .stage, .unlock] : [.account, .stage, .unlock]) as [InstallStep] {
             try await installer.perform(step)
@@ -982,7 +1016,8 @@ case "job":
     let jobs = jobStore(o)
     let runner = JobRunner(store: jobs)
     func run(_ job: Job) async {
-        let installer = Installer(recipe: job.recipe, request: job.request, store: contentStore(o)) { print("  " + $0) }
+        var installer = Installer(recipe: job.recipe, request: job.request, store: contentStore(o)) { print("  " + $0) }
+        installer.metaTool = metaToolURL(o)
         do {
             let now = (try? Toolchain(root: URL(fileURLWithPath: job.request.toolchain)).commit()) ?? L("unknown", "unbekannt")
             let done = try await runner.run(job, currentToolchain: now, log: { print($0) }) { step, _ in try await installer.perform(step) }

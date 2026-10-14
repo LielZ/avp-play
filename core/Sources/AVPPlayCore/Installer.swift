@@ -167,6 +167,8 @@ public struct Installer: Sendable {
     let control = DeviceControl()
     let report: @Sendable (String) -> Void
     let progress: @Sendable (InstallProgress) -> Void
+    /// Metas Werkzeug, falls eingerichtet: der Ausweg für Dateien, die die direkte Adresse mit HTTP 404 verweigert.
+    public var metaTool: URL?
 
     public init(recipe: Recipe, request: InstallRequest, store: ContentStore,
                 progress: @escaping @Sendable (InstallProgress) -> Void = { _ in },
@@ -420,14 +422,19 @@ public struct Installer: Sendable {
                                     " \(elsewhere) davon liegen aus einer anderen Fassung dieses Spiels im Bestand; jede wird von dort übernommen, wenn sie unverändert ist.") : ""))
 
         var client = MetaClient(token: "unbenutzt")       // ohne Meta-Dateien wird er nie benutzt
+        var token: String?
         if todo.contains(where: { $0.file.source == nil }) {
-            client = MetaClient(token: try TokenStore().read(account: request.account))
+            token = try TokenStore().read(account: request.account)
+            client = MetaClient(token: token ?? "")
             let user = try await client.me()
             if let app = recipe.store.appId {
                 guard try await client.ownsApp(appId: app, userId: user) else { throw InstallError.notOwned(recipe.title) }
             }
         }
         var fetcher = Fetcher(client: client, store: store, gate: RequestGate(minInterval: .seconds(request.interval)))
+        if let token, let tool = metaTool, (try? MetaTool(url: tool).verify()) != nil {
+            fetcher.toolFallback = MetaToolDownload(tool: tool, token: token)
+        }
         // Sobald das APK da ist, steht fest, ob es überhaupt 64-Bit-Code enthält. Wenn nicht, wird nichts weiter
         // geladen – bei République VR wären das 3,4 GB für ein Spiel gewesen, das nie starten kann.
         let title = recipe.title

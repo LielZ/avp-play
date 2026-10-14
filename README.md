@@ -17,7 +17,7 @@ downloaded that Meta does not confirm you have purchased.
 | Mac | Apple silicon, macOS 14 or later, with [Xcode](https://apps.apple.com/app/xcode/id497799835) and its visionOS platform installed |
 | Headset | Apple Vision Pro, paired with Xcode, Developer Mode on, on the same Wi-Fi as the Mac |
 | Apple account | A paid [Apple Developer Program](https://developer.apple.com/programs/) membership. Free teams do not work: the entitlements the games need are missing. |
-| Meta account | The account that owns the games, and Meta's own command-line tool [`ovr-platform-util`](https://developers.meta.com/horizon/resources/publish-reference-platform-command-line-utility/) (used only to sign in). You download it from Meta's page; the app finds the download and sets it up. |
+| Meta account | The account that owns the games, and Meta's own command-line tool [`ovr-platform-util`](https://developers.meta.com/horizon/resources/publish-reference-platform-command-line-utility/) (used to sign in, to look up the files of a game nobody has tested yet, and as a second way to download a file when Meta's direct address refuses it). You download it from Meta's page; the app finds the download and sets it up. |
 | Controllers | Whatever the game needs – most of these games expect tracked controllers. An ordinary game controller (DualSense, Xbox, …) also works together with your hands: the hands show where they are and pinch to grab, the controller adds both sticks and the buttons. Moss is set up for this. |
 | Disk space | Games are large. Asgard's Wrath 2 alone is about 34 GB on the Mac and again on the headset. |
 
@@ -176,6 +176,13 @@ their own recipe.
 - **Meta sign-in** runs through Meta's own tool. AVP Play is only the window in front of it: what you type goes
   to that tool and is not stored. The access token Meta returns is kept in the macOS keychain and nowhere else.
   It is sent only to Meta, only as a request header, and never appears in logs.
+- **Meta's tool** takes the token only as a command-line argument. While it lists a game's files, or downloads
+  one that Meta's direct address refuses with HTTP 404 (it is tried once, then the job stops with the tool's
+  reason), other programs of the same macOS user could see the token. Its own log goes to a folder that is deleted
+  afterwards. When the tool answers "Cannot find apk with ID" – Meta does that to some accounts after many
+  downloads – the app asks Meta for the build's details instead. That query is not in Meta's developer
+  documentation (it is the one the public library OculusGraphQLApiLib calls `GetBinaryDetails`); only the files'
+  IDs, names and sizes are read from the answer.
 - **Steam sign-in** (optional, for Doom 3, Half-Life: Alyx and a Steam copy of Walkabout Mini Golf) runs through Valve's own tool, SteamCMD. The app
   downloads it straight from Valve, checks before every start that the program is signed by Valve, and gives it a
   folder of its own, apart from a Steam you may have installed. Your password and Steam Guard code go to that tool
