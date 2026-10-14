@@ -199,8 +199,8 @@ public struct Fetcher: Sendable {
             try afterFile?(file, final)
             summary.downloaded += 1
             summary.bytes += size - offset
-            log(L("downloaded: \(file.name) (\(size) bytes\(outcome.resumed ? ", resumed" : "")\(file.sha256 == nil ? ", checksum newly recorded" : ", checksum matches"))",
-                  "geladen: \(file.name) (\(size) Bytes\(outcome.resumed ? ", fortgesetzt" : "")\(file.sha256 == nil ? ", Prüfsumme neu erfasst" : ", Prüfsumme stimmt"))"))
+            log(L("downloaded: \(file.name) (\(Installer.megabytes(size))\(outcome.resumed ? ", resumed" : "")\(file.sha256 == nil ? ", checksum newly recorded" : ", checksum matches"))",
+                  "geladen: \(file.name) (\(Installer.megabytes(size))\(outcome.resumed ? ", fortgesetzt" : "")\(file.sha256 == nil ? ", Prüfsumme neu erfasst" : ", Prüfsumme stimmt"))"))
         }
         return summary
     }

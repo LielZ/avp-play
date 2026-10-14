@@ -996,6 +996,12 @@ public struct Installer: Sendable {
     }
 
     public static func gigabytes(_ bytes: Int64) -> String { String(format: "%.2f GB", Double(bytes) / 1e9) }
+    /// Für den Verlauf eines Auftrags: eine Stelle nach dem Komma unter 100 MB, darüber ganze MB.
+    public static func megabytes(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1e6
+        if bytes > 0, mb < 0.1 { return "< 0.1 MB" }
+        return String(format: mb < 100 ? "%.1f MB" : "%.0f MB", mb)
+    }
 }
 
 /// Ein Schalter, den ein Thread setzt und ein anderer liest.

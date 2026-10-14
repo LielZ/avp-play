@@ -135,3 +135,14 @@ final class BinaryDetailsTests: XCTestCase {
         XCTAssertFalse(MetaListing.isNotFound(ListingError.nothingListed))
     }
 }
+
+final class MegabytesTests: XCTestCase {
+    func testDownloadSizesReadAsMegabytes() {
+        XCTAssertEqual(Installer.megabytes(0), "0.0 MB")
+        XCTAssertEqual(Installer.megabytes(1_695), "< 0.1 MB")
+        XCTAssertEqual(Installer.megabytes(7_027_867), "7.0 MB")
+        XCTAssertEqual(Installer.megabytes(43_406_683), "43.4 MB")
+        XCTAssertEqual(Installer.megabytes(325_900_000), "326 MB")
+        XCTAssertEqual(Installer.megabytes(4_600_000_000), "4600 MB")
+    }
+}
