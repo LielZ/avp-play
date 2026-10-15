@@ -96,6 +96,34 @@ public enum MetaListing {
         return files
     }
 
+    /// Ob das Werkzeug den Build „nicht findet“ – so antwortet es einem Konto nach vielen Downloads auf jede
+    /// Abfrage (Schritt 0, F61), auch für Spiele, die es Stunden zuvor noch auflistete.
+    public static func isNotFound(_ error: Error) -> Bool {
+        guard case ListingError.refused(let why) = error else { return false }
+        return why.contains("Cannot find")
+    }
+
+    /// Alle Dateien eines Builds: zuerst Metas Werkzeug (APK und OBB, nach einer Pause die weiteren Dateien).
+    /// Antwortet es „Cannot find …“, nennen Metas Build-Details die Dateien (`MetaClient.buildFiles`); nennen
+    /// auch die nichts, bleibt es bei der Absage des Werkzeugs.
+    public static func files(buildId: String, tool: URL, token: String, client: MetaClient,
+                             say: @Sendable (String) async -> Void = { _ in }) async throws -> [ListedFile] {
+        var files: [ListedFile]
+        do {
+            files = try list(.build, buildId: buildId, tool: tool, token: token)
+        } catch where isNotFound(error) {
+            await say(L("Meta's tool doesn't answer for this account (“Cannot find …”); asking Meta for the build's details instead …",
+                        "Metas Werkzeug antwortet diesem Konto nicht („Cannot find …“); Meta wird stattdessen nach den Details des Builds gefragt …"))
+            let details = (try? await client.buildFiles(buildId: buildId)) ?? []
+            guard details.contains(where: { $0.kind == "APK" }) else { throw error }
+            return details
+        }
+        try await Task.sleep(for: .seconds(5))
+        // Weitere Dateien hat nicht jedes Spiel; sagt das Werkzeug dazu nichts oder lehnt ab, bleibt es bei APK und OBB.
+        if let assets = try? list(.assets, buildId: buildId, tool: tool, token: token) { files += assets }
+        return files
+    }
+
     /// Der Satz, mit dem das Werkzeug ablehnt, soweit es einen sagt.
     static func reason(in output: String) -> String? {
         for raw in output.split(whereSeparator: \.isNewline).reversed() {
@@ -108,6 +136,122 @@ public enum MetaListing {
             if !text.isEmpty, !text.hasPrefix("Logs are written"), !text.hasPrefix("Total time") { return String(text.prefix(200)) }
         }
         return nil
+    }
+}
+
+public enum ToolDownloadError: Error, CustomStringConvertible, Equatable {
+    case refused(String)
+    case missingFile(String)
+
+    public var description: String {
+        switch self {
+        case .refused(let why):
+            return L("Meta won't deliver this file (HTTP 404), and Meta's tool didn't download it either: \(why)",
+                     "Meta liefert diese Datei nicht aus (HTTP 404), und auch Metas Werkzeug hat sie nicht geladen: \(why)")
+        case .missingFile(let name):
+            return L("Meta won't deliver \(name) (HTTP 404); Meta's tool finished, but the file wasn't among what it downloaded.",
+                     "Meta liefert \(name) nicht aus (HTTP 404); Metas Werkzeug lief durch, aber die Datei war nicht unter dem, was es geladen hat.")
+        }
+    }
+}
+
+/// Lädt mit Metas Werkzeug statt über die direkte Adresse – der Ausweg, wenn die direkte Adresse eine Datei
+/// des Spiels mit HTTP 404 verweigert, das Werkzeug sie aber herausgibt (First Encounters, 2026-10-15; vom
+/// Nutzer so gewünscht). Wie beim Auflisten steht der Token dabei für die Dauer des Aufrufs in den
+/// Prozessargumenten; er wird nie protokolliert, und das Werkzeug schreibt sein Protokoll in einen eigenen
+/// Ordner, der mit dem Ladeordner gelöscht wird.
+public struct MetaToolDownload: Sendable {
+    public enum Command: Sendable, Equatable {
+        /// APK und Haupt-OBB eines Builds. Die Kennung des Builds ist die seines APKs.
+        case build(String)
+        /// Eine weitere Datei des Builds.
+        case asset(String)
+
+        var arguments: [String] {
+            switch self {
+            case .build(let id): return ["download-quest-build", "-b", id]
+            case .asset(let id): return ["download-asset-file", "--asset-file-id", id]
+            }
+        }
+    }
+
+    public let tool: URL
+    let token: String
+
+    /// `tool` muss zuvor als Metas Werkzeug geprüft sein (`MetaTool.verify`).
+    public init(tool: URL, token: String) {
+        self.tool = tool
+        self.token = token
+    }
+
+    /// Lädt nach `folder`. Wie das Werkzeug die Dateien dort ablegt (das Haupt-OBB in einem eigenen Unterordner),
+    /// bleibt ihm überlassen; gefunden werden sie mit `find`.
+    public func fetch(_ command: Command, into folder: URL) async throws {
+        let id: String
+        switch command { case .build(let b): id = b; case .asset(let a): id = a }
+        guard CatalogGame.isIdentifier(id), TokenStore.isPlausible(token) else { throw ToolDownloadError.refused("–") }
+        let fm = FileManager.default
+        let logs = folder.appendingPathComponent(".tool-tmp", isDirectory: true)
+        try fm.createDirectory(at: logs, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? fm.removeItem(at: logs) }
+
+        let p = Process()
+        p.executableURL = tool
+        p.arguments = command.arguments + ["-d", folder.path, "--output-format", "json", "-t", token]
+        p.currentDirectoryURL = logs
+        var env = ProcessInfo.processInfo.environment
+        env["TMPDIR"] = logs.path + "/"
+        p.environment = env
+        // Das Werkzeug meldet laufend Fortschritt; gelesen wird mit, damit es nie an einer vollen Leitung hängt,
+        // behalten wird nur das Ende – darin steht, warum es abbricht.
+        let tail = OutputTail()
+        let out = Pipe()
+        out.fileHandleForReading.readabilityHandler = { tail.append($0.availableData) }
+        p.standardOutput = out
+        p.standardError = out
+        p.standardInput = FileHandle.nullDevice
+        let status: Int32 = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Int32, Error>) in
+                p.terminationHandler = { c.resume(returning: $0.terminationStatus) }
+                do { try p.run() } catch { p.terminationHandler = nil; c.resume(throwing: error) }
+            }
+        } onCancel: {
+            p.terminate()
+        }
+        out.fileHandleForReading.readabilityHandler = nil
+        tail.append(out.fileHandleForReading.readDataToEndOfFile())
+        try Task.checkCancellation()
+        guard status == 0 else {
+            let text = Redaction.redact(tail.text).replacingOccurrences(of: token, with: "<REDACTED>")
+            throw ToolDownloadError.refused(MetaListing.reason(in: text) ?? "status \(status)")
+        }
+    }
+
+    /// Die geladene Datei dieses Namens irgendwo unter `folder`.
+    public static func find(_ name: String, in folder: URL) -> URL? {
+        guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) else { return nil }
+        for case let url as URL in walk where url.lastPathComponent == name {
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true { return url }
+        }
+        return nil
+    }
+}
+
+/// Das Ende einer Ausgabe, höchstens 64 KB.
+private final class OutputTail: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        data.append(chunk)
+        if data.count > 1 << 16 { data = data.suffix(1 << 16) }
+    }
+
+    var text: String {
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 

@@ -86,6 +86,18 @@ public enum Renewal {
     /// Nach einem Versuch, der nichts verlängert hat, wird so lange gewartet, bevor derselbe Bau noch einmal läuft.
     public static let retryAfter: TimeInterval = 6 * 3600
 
+    /// Was ein neu signierter Bau vom bisherigen übernimmt: die Schalter und die Startauflösung, so wie der Stempel
+    /// sie trägt. Fehlt dort eine Auflösung, bleibt sie weg (die des Targets) – das Erneuern verlängert nur die Frist.
+    static func keepBuild(_ built: AppStamp.Built?, in request: inout InstallRequest) {
+        guard let built else { return }
+        if built.experimental { request.experimental = true }
+        if built.metalFX {
+            request.metalFX = true
+            request.resolution = built.resolution
+        }
+        if built.xrPrediction { request.xrPrediction = true }
+    }
+
     /// Ist die Installation jetzt dran? Ab dem Zeitpunkt, ab dem auch die App an die Erneuerung erinnert (zwei Tage
     /// vor Ablauf bei sieben Tagen, dreißig bei einem Jahr) – und nicht kurz nach einem Versuch, der nichts brachte.
     public static func isDue(_ record: SigningRecord, now: Date) -> Bool {
@@ -198,7 +210,7 @@ public enum Renewal {
                 guard var current = SigningRecord.load(store: store, recipe: recipe) else { return }
                 current.renewalTried = now
                 current.renewalNote = note
-                current.save(store: store, recipe: recipe)
+                current.save(store: store, recipe: recipe, live: true)
             }
             guard let bundle = installedBundle(recipe: recipe, record: record, apps: apps),
                   let app = apps.first(where: { $0.bundleIdentifier == bundle }) else {
@@ -224,11 +236,15 @@ public enum Renewal {
             request.device = device.udid
             request.bundleId = bundle
             request.resign = true
+            // Erneuert wird die eigentliche Installation, mit dem Namen, den sie bekommen hat.
+            request.live = true
+            request.displayName = record.displayName
+            request.displaySuffix = record.displaySuffix
             request.storeArt = false
             request.addons = false
             // Ein neu signierter Bau bleibt, was er war: Hatte er die experimentellen Implementierungen an, dann
             // auch danach – das Erneuern soll an einem Spiel nichts ändern außer der Frist.
-            if app.bundleVersion.flatMap(AppStamp.parse)?.experimental == true { request.experimental = true }
+            Renewal.keepBuild(app.bundleVersion.flatMap(AppStamp.parse), in: &request)
             let installer = Installer(recipe: recipe, request: request, store: store, report: { log("  " + $0) })
             do {
                 try await installer.perform(.build)

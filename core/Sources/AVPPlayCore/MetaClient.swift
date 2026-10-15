@@ -115,6 +115,49 @@ public struct MetaClient: Sendable {
         return builds.sorted { $0.versionCode > $1.versionCode }.filter { seen.insert($0.versionCode).inserted }
     }
 
+    /// Die hinterlegte Abfrage „Details eines Builds“ in Metas Abfragesprache, unter der Nummer, unter der sie die
+    /// öffentliche Bibliothek OculusGraphQLApiLib (ComputerElite, `GetBinaryDetails`) stellt.
+    static let binaryDetailsQuery = "4734929166632773"
+
+    /// Die Dateien eines Builds, wie Metas Build-Details sie nennen: das APK, das Haupt-OBB und die weiteren Dateien.
+    ///
+    /// Wie `builds(appId:)` steht auch diese Abfrage in keiner Dokumentation für Entwickler. Der Nutzer hat ihr am
+    /// 2026-10-15 zugestimmt – als Ausweg, wenn Metas Werkzeug einem Konto nach vielen Downloads nur noch
+    /// „Cannot find apk with ID“ antwortet, die direkte Adresse aber weiter ausliefert. Gelesen werden je Datei nur
+    /// Kennung, Name und Größe; eine Antwort, die anders aussieht als erwartet, ergibt eine leere Liste.
+    public func buildFiles(buildId: String) async throws -> [ListedFile] {
+        guard CatalogGame.isIdentifier(buildId) else { return [] }
+        let data = try await graph(path: "/graphql", form: ["doc_id": MetaClient.binaryDetailsQuery,
+                                                             "variables": "{\"binaryID\":\"\(buildId)\"}"])
+        return MetaClient.files(inBinaryDetails: data, buildId: buildId)
+    }
+
+    /// Liest `data.node` (der Build selbst, seine Kennung ist die des APKs) mit `file_name`, `size`, `obb_binary`
+    /// und `asset_files` (als `nodes` oder `edges`). Ohne APK, oder für einen anderen Build, ist die Liste leer.
+    static func files(inBinaryDetails data: Data, buildId: String) -> [ListedFile] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let payload = root["data"] as? [String: Any], let binary = payload["node"] as? [String: Any],
+              (binary["id"] as? String) == buildId, let apk = listedFile(binary, kind: "APK") else { return [] }
+        var files = [apk]
+        if let obb = binary["obb_binary"] as? [String: Any], let file = listedFile(obb, kind: "OBB") { files.append(file) }
+        let assets = binary["asset_files"] as? [String: Any]
+        let nodes = (assets?["nodes"] as? [[String: Any]])
+            ?? (assets?["edges"] as? [[String: Any]])?.compactMap { $0["node"] as? [String: Any] } ?? []
+        var seen = Set(files.map(\.name))
+        for node in nodes {
+            if let file = listedFile(node, kind: "ASSET"), seen.insert(file.name).inserted { files.append(file) }
+        }
+        return files
+    }
+
+    private static func listedFile(_ object: [String: Any], kind: String) -> ListedFile? {
+        guard let id = object["id"] as? String, CatalogGame.isIdentifier(id),
+              let name = object["file_name"] as? String, !name.isEmpty, Recipe.isSafeName(name) else { return nil }
+        let bytes = (object["size"] as? String).flatMap { Int64($0) } ?? (object["size"] as? NSNumber)?.int64Value
+        let size = bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
+        return ListedFile(name: name, id: id, kind: kind, sizeText: size)
+    }
+
     /// Die vom Store bestätigten Käufe innerhalb einer App (SKUs). Abgelaufene Käufe zählen nicht.
     public func purchases(appId: String, now: Date = Date()) async throws -> [String] {
         struct Page: Decodable {

@@ -1,5 +1,6 @@
 import AppKit
 import AVPPlayCore
+import Combine
 import SwiftUI
 import UserNotifications
 
@@ -25,6 +26,8 @@ struct Game: Identifiable {
     var sources: [Recipe.Source] = []
     /// Die Versionscodes, unter denen dasselbe Spiel aus einer anderen Kaufquelle installiert wäre.
     var otherSourceBuilds: [Int] = []
+    /// Ein Versuch, dessen APK sich als 2D-App herausgestellt hat (`FlatApp`), kein VR-Spiel.
+    var flatApp = false
     var id: String { recipe.id }
     /// Sind die Dateien des Spiels bekannt? Bei einem Platzhalter noch nicht.
     var prepared: Bool { !draft || !recipe.files.isEmpty }
@@ -71,6 +74,12 @@ struct Game: Identifiable {
     var downloaded: Bool { prepared && status.filesRequired + status.treesRequired > 0 && status.stockComplete }
 }
 
+/// Die letzten Zeilen eines Verlaufs (höchstens `AppModel.logLinesKept` und ein Schub) und wie viele es insgesamt sind.
+struct LogTail: Equatable {
+    var lines: [String] = []
+    var total = 0
+}
+
 /// Vom Projekt geprüft, von Nutzern bestätigt, noch offen, oder von Nutzern als nicht lauffähig gemeldet.
 enum Trust: Int { case verified, community, untested, incompatible }
 
@@ -88,6 +97,9 @@ struct GameOptions: Codable, Equatable {
     /// Beim Installieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat.
     /// Wählbar und nicht fest, weil ältere gespeicherte Angaben den Eintrag nicht kennen; ohne Angabe: ja.
     var restoreSaves: Bool?
+    /// Test: die XR-Vorhersage in diesem Spiel von Anfang an einschalten (`Toolchain.xrPredictionSwitch`). Ohne
+    /// Angabe: aus – das Spiel bekommt die Kopfpose ohne Vorhersage.
+    var xrPrediction: Bool?
 }
 
 /// Die in der Übersicht angehakten Spiele – ein eigener, kleiner Zustand (siehe `AppModel.picked`).
@@ -152,7 +164,9 @@ final class AppModel: ObservableObject {
     @Published var selectedJob: String?
     @Published var runningJob: String?
     @Published var queued: [String] = []
-    @Published var logs: [String: [String]] = [:]
+    @Published var logs: [String: LogTail] = [:]
+    /// Die offenen Verlaufsdateien laufender Aufträge (siehe `closeLog`).
+    private let logFiles = JobLogFiles()
     @Published var notice: String?
     @Published var teamCandidates: [Probe.Team] = []
     /// Metas letzte Antworten auf die Besitzfrage, je Store-App.
@@ -224,9 +238,10 @@ final class AppModel: ObservableObject {
     @AppStorage("autoRemoveOldToolchains") var autoRemoveOldToolchains = true
     /// Initial controller mode for newly built games; the headset preference wins later.
     @AppStorage(ControllerMode.preferenceKey) var controllerMode: ControllerMode = .standard
-    /// Experimentell: In jedem Spiel, das installiert oder aktualisiert wird, sind die neue Kopfposen- und die neue
-    /// Audio-Implementierung der Toolchain von Anfang an eingeschaltet (`Toolchain.experimentalSwitches`) – als
-    /// wären die bisherigen schon entfernt. Ein Bau, der es anders hält als diese Einstellung, gilt als
+    /// Experimentell: In jedem Spiel, das installiert oder aktualisiert wird, ist die neue Audio-Implementierung der
+    /// Toolchain von Anfang an eingeschaltet (`Toolchain.experimentalSwitches`) – als wäre die bisherige schon
+    /// entfernt. Die Kopfposen-Implementierung, die die Liste auch nennt, wirkt nur noch mit Toolchain 507; neuere
+    /// benutzen sie ohnehin (Klepton #9). Ein Bau, der es anders hält als diese Einstellung, gilt als
     /// aktualisierbar, sodass „Alle aktualisieren“ nach dem Umlegen alle installierten Spiele umstellt.
     @AppStorage(AppModel.experimentalKey) var experimentalImplementations = false
     nonisolated static let experimentalKey = "experimentalImplementations"
@@ -235,6 +250,41 @@ final class AppModel: ObservableObject {
     nonisolated static func experimentalExpected(toolchain: Toolchain?) -> Bool? {
         guard let toolchain, toolchain.supportsExperimental else { return nil }
         return UserDefaults.standard.bool(forKey: experimentalKey)
+    }
+    /// MetalFX: In jedem Spiel, das installiert oder aktualisiert wird, ist das Hochskalieren des Compositors von
+    /// Anfang an eingeschaltet (`Toolchain.metalFXSwitch`, Klepton PR #2). Aus ist das bisherige Verhalten: Das Spiel
+    /// startet mit dem linearen Strecken, und der Schalter im Spiel entscheidet. Wie bei der experimentellen
+    /// Einstellung gilt ein Bau, der es anders hält, als aktualisierbar.
+    @AppStorage(AppModel.metalFXKey) var metalFXUpscaling = false
+    nonisolated static let metalFXKey = "metalFXUpscaling"
+    /// Die Auflösung in Prozent, mit der ein Spiel bei eingeschaltetem MetalFX beginnt (`MetalFXResolution`).
+    @AppStorage("metalFXResolution") var metalFXResolution = MetalFXResolution.full
+    /// Der Wert von vor dem Einschalten; 0: keiner.
+    @AppStorage("metalFXResolutionBefore") private var metalFXResolutionBefore = 0
+    /// Den MetalFX-Schalter umlegen: Ein belegt die Auflösung mit 75 % vor, aus stellt die von davor wieder her.
+    func setMetalFXUpscaling(_ on: Bool) {
+        let state = MetalFXResolution.switched(metalFX: on, was: metalFXUpscaling,
+                                               state: .init(resolution: metalFXResolution,
+                                                            before: metalFXResolutionBefore > 0 ? metalFXResolutionBefore : nil))
+        metalFXResolution = state.resolution
+        metalFXResolutionBefore = state.before ?? 0
+        metalFXUpscaling = on
+    }
+    /// Was `GameStatus` von einem aktuellen Bau zum MetalFX-Hochskalieren erwartet; `nil` ohne eine Toolchain, die es
+    /// kann.
+    nonisolated static func metalFXExpected(toolchain: Toolchain?) -> Bool? {
+        guard let toolchain, toolchain.supportsMetalFX else { return nil }
+        return UserDefaults.standard.bool(forKey: metalFXKey)
+    }
+    /// Was `GameStatus` von einem aktuellen Bau zur XR-Vorhersage erwartet – je Spiel, aus dessen Option
+    /// (`GameOptions.xrPrediction`); `nil` ohne eine Toolchain, die sie umstellen kann. Liest die gespeicherten
+    /// Optionen selbst, weil die Bestandsaufnahme nicht auf dem Hauptthread läuft.
+    nonisolated static func xrPredictionExpected(supported: Bool?) -> ((String) -> Bool)? {
+        guard supported == true else { return nil }
+        let saved = UserDefaults.standard.data(forKey: "gameOptions")
+            .flatMap { try? JSONDecoder().decode([String: GameOptions].self, from: $0) } ?? [:]
+        let on = Set(saved.filter { $0.value.xrPrediction == true }.keys)
+        return { on.contains($0) }
     }
     /// Für welche Spiele eine andere Toolchain als die neueste gewählt ist (siehe `ToolchainChoices`).
     @Published var toolchainChoices = ToolchainChoices.load()
@@ -248,11 +298,16 @@ final class AppModel: ObservableObject {
     let covers = CoverLoader()
     @AppStorage("filterFavourites") var filterFavourites = false
     /// Was das Gerät zuletzt als installiert gemeldet hat, und ab welcher Toolchain-Nummer ein Bau aktuell ist.
-    var installedApps: [InstalledApp]?
-    var toolchainRevision: Int?
+    /// Nicht `@Published`, fließt aber in `derived` ein – daher verwirft jede Änderung es selbst.
+    var installedApps: [InstalledApp]? { didSet { invalidateDerived() } }
+    var toolchainRevision: Int? { didSet { invalidateDerived() } }
     /// Was ein aktueller Bau von der experimentellen Einstellung tragen soll; `nil`, solange keine Toolchain da
     /// ist, die das kann – dann wird nicht verglichen.
-    var experimentalExpected: Bool?
+    var experimentalExpected: Bool? { didSet { invalidateDerived() } }
+    /// Dasselbe für das MetalFX-Hochskalieren.
+    var metalFXExpected: Bool? { didSet { invalidateDerived() } }
+    /// Ob die neueste Toolchain die XR-Vorhersage als Option kennt; `nil` ohne Toolchain.
+    @Published var xrPredictionSupported: Bool?
     /// Wie weit das Kopieren aufs Gerät im laufenden Auftrag ist.
     @Published var copyProgress: [String: InstallProgress] = [:]
     /// Eine neuere veröffentlichte Fassung, falls es eine gibt.
@@ -329,10 +384,45 @@ final class AppModel: ObservableObject {
     var saveWatch: Task<Void, Never>?
     var saveTicks = 0
 
+    /// Was aus dem übrigen Zustand folgt und teuer zu bestimmen ist, gemerkt bis zur nächsten Änderung: Jede
+    /// Änderung an einer veröffentlichten Eigenschaft verwirft es, dieselbe, die die Oberfläche neu zeichnen lässt.
+    /// Einstellungen (`@AppStorage`) melden sich dabei ebenso, auch wenn sie direkt in `UserDefaults` geändert
+    /// werden. Was keine solche Meldung kennt, verwirft es selbst (`invalidateDerived`): die nicht veröffentlichten
+    /// Angaben zum Gerät und zur Toolchain, und was sich außerhalb des Programms ändert – Toolchains, die die
+    /// Kommandozeile installiert oder entfernt (beim Zurückkehren ins Programm), und ein- oder ausgehängte Platten.
+    /// Nicht `@Published` – das Merken selbst ist keine Änderung.
+    struct Derived {
+        /// Doppelt optional: außen „noch nicht bestimmt“, innen „keine Toolchain“.
+        var toolchain: Toolchain??
+        var updatable: [Game]?
+        var shownGames: [Game]?
+    }
+    var derived = Derived()
+    private var derivedReset: AnyCancellable?
+    private var derivedObservers: [NSObjectProtocol] = []
+
     init() {
         applyLanguage()
         if let data = UserDefaults.standard.data(forKey: "gameOptions"),
            let saved = try? JSONDecoder().decode([String: GameOptions].self, from: data) { options = saved }
+        derivedReset = objectWillChange.sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.invalidateDerived() }
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        for (center, name) in [(NotificationCenter.default, NSApplication.didBecomeActiveNotification),
+                               (workspace, NSWorkspace.didMountNotification),
+                               (workspace, NSWorkspace.didUnmountNotification),
+                               (workspace, NSWorkspace.didRenameVolumeNotification)] {
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.invalidateDerived() }
+            }
+            derivedObservers.append(token)
+        }
+    }
+
+    /// Verwirft, was in `derived` gemerkt ist; beim nächsten Fragen wird es neu bestimmt. Zeichnet nichts neu.
+    func invalidateDerived() {
+        derived = Derived()
     }
 
     // MARK: Besitz
@@ -389,7 +479,8 @@ final class AppModel: ObservableObject {
         // (Gerät fragen, jeden Ordner im Bestand zählen) dauert Sekunden und ändert an den anderen Spielen nichts.
         let id = game.id, catalog = game.catalog
         let paths = paths, apps = installedApps, revision = toolchainRevision, prefix = bundlePrefix, drafts = draftsDirectory
-        let pin = toolchainChoices.games[id], experimental = experimentalExpected
+        let pin = toolchainChoices.games[id], experimental = experimentalExpected, metalFX = metalFXExpected
+        let xrPrediction = xrPredictionExpected(for: id)
         Task.detached(priority: .userInitiated) {
             var fresh: Game?
             if let recipes = paths.recipes {
@@ -399,7 +490,7 @@ final class AppModel: ObservableObject {
                     let active = StoreUpdate.resolve([tested], variants: variants, sources: sources, drafts: drafts, choices: choices).first ?? tested
                     fresh = Probe.game(active, draft: false, tested: tested, variants: variants, sources: sources, paths: paths,
                                        apps: apps, toolchainRevision: revision, pin: pin, bundlePrefix: prefix,
-                                       experimental: experimental)
+                                       experimental: experimental, metalFX: metalFX, xrPrediction: xrPrediction)
                     fresh?.catalog = catalog
                 }
             }
@@ -444,30 +535,41 @@ final class AppModel: ObservableObject {
     }
 
     /// Die Spiele, die zu den gesetzten Filtern passen.
-    var shownGames: [Game] { visible(allGames) }
+    /// Gemerkt bis zur nächsten Änderung am Zustand (siehe `derived`): Die Übersicht fragt mehrmals je Neuzeichnen.
+    var shownGames: [Game] {
+        if let known = derived.shownGames { return known }
+        let fresh = visible(allGames)
+        derived.shownGames = fresh
+        return fresh
+    }
 
     /// Aus einer Menge von Spielen die, die zu den gesetzten Filtern passen, in der Reihenfolge der Übersicht.
     func visible(_ games: [Game]) -> [Game] {
         let words = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return games.filter { game in
+        // Was Filter und Sortierung brauchen, einmal je Spiel – nicht bei jedem Vergleich des Sortierens.
+        let keyed = games.compactMap { game -> (game: Game, rank: Int, works: Int)? in
+            let trust = game.trust, installed = game.installed, downloaded = game.downloaded
+            let favourite = isFavourite(game)
             // „Geprüft“ und „Von Nutzern bestätigt“ ergänzen einander; alle anderen Filter engen weiter ein.
-            ((!filterVerified && !filterCommunity) || (filterVerified && game.trust == .verified) || (filterCommunity && game.trust == .community))
-                && (!filterInstalled || game.installed)
-                && (!filterDownloaded || (game.downloaded && !game.installed))
-                && (!filterFavourites || isFavourite(game))
-                && (!filterFavouritesMissing || (isFavourite(game) && !game.downloaded))
+            guard ((!filterVerified && !filterCommunity) || (filterVerified && trust == .verified) || (filterCommunity && trust == .community))
+                && (!filterInstalled || installed)
+                && (!filterDownloaded || (downloaded && !installed))
+                && (!filterFavourites || favourite)
+                && (!filterFavouritesMissing || (favourite && !downloaded))
                 && (!filterMixedReality || game.mixedReality)
                 && (words.isEmpty || game.recipe.title.lowercased().contains(words) || game.recipe.package.lowercased().contains(words))
-        }.sorted { a, b in
+            else { return nil }
             // Geprüftes zuerst, dann schon Nachgeschlagenes, dann was Nutzer bestätigen, das Ungetestete, zuletzt
             // was nicht läuft – jeweils nach der Zahl derer, die sagen, es läuft, dann nach Namen. So reiht auch
             // der Katalog, damit eine nachgeladene Seite unten anschließt.
-            let rank: (Game) -> Int = { $0.trust == .verified ? 0 : ($0.prepared && $0.trust != .incompatible ? 1 : $0.trust.rawValue + 1) }
-            if rank(a) != rank(b) { return rank(a) < rank(b) }
-            let works: (Game) -> Int = { $0.catalog?.works ?? 0 }
-            if works(a) != works(b) { return works(a) > works(b) }
-            return a.recipe.title.localizedCaseInsensitiveCompare(b.recipe.title) == .orderedAscending
+            let rank = trust == .verified ? 0 : (game.prepared && trust != .incompatible ? 1 : trust.rawValue + 1)
+            return (game, rank, game.catalog?.works ?? 0)
         }
+        return keyed.sorted { a, b in
+            if a.rank != b.rank { return a.rank < b.rank }
+            if a.works != b.works { return a.works > b.works }
+            return a.game.recipe.title.localizedCaseInsensitiveCompare(b.game.recipe.title) == .orderedAscending
+        }.map(\.game)
     }
 
     /// Fragt für jedes Store-Spiel, ob das Konto es besitzt – höchstens einmal am Tag je Spiel. Beim ersten
@@ -642,8 +744,29 @@ final class AppModel: ObservableObject {
     }
 
     func setOptions(_ value: GameOptions, for game: Game) {
+        let xrBefore = options(for: game).xrPrediction == true
         options[game.id] = value
         if let data = try? JSONEncoder().encode(options) { UserDefaults.standard.set(data, forKey: "gameOptions") }
+        // Die XR-Vorhersage entscheidet mit, ob ein installierter Bau aktuell ist: den Stand dieses Spiels gleich neu
+        // bestimmen, nicht erst bei der nächsten Bestandsaufnahme.
+        if (value.xrPrediction == true) != xrBefore { refreshStatus(of: game.id) }
+    }
+
+    /// Bestimmt den Stand eines Spiels neu, mit dem, was gerade bekannt ist (Gerät, Toolchain, Einstellungen).
+    func refreshStatus(of id: String) {
+        guard var fresh = allGames.first(where: { $0.id == id }) ?? games.first(where: { $0.id == id }) else { return }
+        fresh.status = GameStatus.of(recipe: fresh.recipe, store: paths.store, apps: installedApps, toolchainVersion: toolchainRevision,
+                                     pin: toolchainChoices.games[id], bundlePrefix: bundlePrefix,
+                                     otherSourceBuilds: Set(fresh.otherSourceBuilds),
+                                     experimental: experimentalExpected, metalFX: metalFXExpected,
+                                     xrPrediction: xrPredictionExpected(for: id))
+        replace(fresh)
+    }
+
+    /// `xrPredictionExpected(supported:)` für ein Spiel, aus den Optionen im Speicher.
+    func xrPredictionExpected(for id: String) -> Bool? {
+        guard xrPredictionSupported == true else { return nil }
+        return options[id]?.xrPrediction == true
     }
 
     /// Wählbare Dateien, die das Rezept unter eigenem Namen anbietet – etwa eine Sprachausgabe von Fans.
@@ -743,7 +866,14 @@ final class AppModel: ObservableObject {
     var teamValid: Bool { teamId.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil }
     /// Das gewählte Team, soweit Xcode es kennt.
     var team: Probe.Team? { teamCandidates.first { $0.id == teamId } }
-    var toolchain: Toolchain? { paths.toolchain() }
+    /// Gemerkt bis zur nächsten Änderung am Zustand (siehe `derived`): Die Übersicht fragt bei jedem Neuzeichnen
+    /// danach, und jedes Mal den Ordner der Toolchains zu lesen kostet.
+    var toolchain: Toolchain? {
+        if let known = derived.toolchain { return known }
+        let fresh = paths.toolchain()
+        derived.toolchain = .some(fresh)
+        return fresh
+    }
 
     /// Was einer Installation im Weg steht, als Satz mit der nächsten Handlung – oder `nil`.
     func blocker(for game: Game) -> String? {
@@ -818,6 +948,8 @@ final class AppModel: ObservableObject {
         installedApps = s.apps
         toolchainRevision = s.toolchainRevision
         experimentalExpected = s.experimentalExpected
+        metalFXExpected = s.metalFXExpected
+        if xrPredictionSupported != s.xrPredictionSupported { xrPredictionSupported = s.xrPredictionSupported }
         toolchainChoices = s.toolchainChoices
         games = s.games
         loadOwnCatalogEntries()
@@ -1210,9 +1342,17 @@ final class AppModel: ObservableObject {
         if steps.contains(.build) { request.controllerMode = controllerMode }
         // Die experimentelle Einstellung gilt für jeden Bau, den dieses Programm anstößt.
         if steps.contains(.build), experimentalImplementations { request.experimental = true }
+        if steps.contains(.build), metalFXUpscaling {
+            request.metalFX = true
+            request.resolution = metalFXResolution
+        }
+        // Die Test-Option des Spiels gilt für jeden Bau – nicht nur für Testkopien.
+        if steps.contains(.build), chosen.xrPrediction == true { request.xrPrediction = true }
         // Ein eigenes Präfix oder das eines kostenlosen Teams: dann steht die Kennung im Auftrag.
         let prefix = bundlePrefix
         if prefix != Toolchain.defaultBundlePrefix() { request.bundleId = "\(prefix).\(game.recipe.toolchain.target)" }
+        // Was dieses Programm installiert, ist immer die eigentliche Installation – auch nach einem neuen Präfix.
+        request.live = true
         do {
             // Eingefroren wird der Stand, mit dem der Auftrag beginnt. Seinen Platz in der Reihe bekommt er dabei.
             let job = try paths.jobs.enqueue(Job(recipe: recipe, request: request, steps: steps, toolchainCommit: toolchain?.commit() ?? ""))
@@ -1229,8 +1369,10 @@ final class AppModel: ObservableObject {
     }
 
     /// Spiele, für die es eine neuere Fassung gibt und denen nichts im Weg steht.
+    /// Gemerkt bis zur nächsten Änderung am Zustand (siehe `derived`).
     var updatable: [Game] {
-        games.filter { game in
+        if let known = derived.updatable { return known }
+        let fresh = games.filter { game in
             // Ein Bau aus einer bearbeiteten Arbeitskopie, die für das Spiel nicht gewählt ist, wird nicht im
             // Sammelauftrag ersetzt: Das entscheidet der Nutzer auf der Seite des Spiels.
             if game.status.builtWith?.modified == true, toolchainChoices.games[game.id] == nil { return false }
@@ -1239,6 +1381,8 @@ final class AppModel: ObservableObject {
             case .current, .notInstalled, .unknown, .otherSource: return false
             }
         }
+        derived.updatable = fresh
+        return fresh
     }
 
     /// Legt für jedes aktualisierbare Spiel einen Auftrag an; sie laufen nacheinander.
@@ -1288,33 +1432,59 @@ final class AppModel: ObservableObject {
         } else {
             queued.removeAll { $0 == job.id }
             _ = try? JobRunner(store: paths.jobs).cancel(job.id)
+            closeLog(job.id)
             reloadJobs()
         }
     }
 
-    func log(for id: String) -> [String] {
-        if let lines = logs[id] { return lines }
+    /// Wie viele Zeilen eines Verlaufs im Speicher bleiben. Gezeigt werden ohnehin nur die letzten (siehe
+    /// `LogView`); vollständig steht er in der Datei.
+    static let logLinesKept = 1000
+
+    func log(for id: String) -> [String] { logTail(for: id).lines }
+
+    /// Das Ende des Verlaufs eines Auftrags und wie viele Zeilen er insgesamt hat.
+    func logTail(for id: String) -> LogTail {
+        if let tail = logs[id] { return tail }
         let text = (try? String(contentsOf: paths.logURL(job: id), encoding: .utf8)) ?? ""
-        return text.split(separator: "\n").map(String.init)
+        let lines = text.split(separator: "\n")
+        return LogTail(lines: lines.suffix(AppModel.logLinesKept).map(String.init), total: lines.count)
     }
 
     private func append(_ id: String, _ line: String) {
         let clean = Redaction.redact(line)
-        logs[id, default: log(for: id)].append(clean)
-        if let handle = try? FileHandle(forWritingTo: paths.logURL(job: id)) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: Data((clean + "\n").utf8))
-        } else {
-            try? Data((clean + "\n").utf8).write(to: paths.logURL(job: id))
-        }
+        var tail = logTail(for: id)
+        tail.lines.append(clean)
+        tail.total += 1
+        // In Schüben kürzen, nicht bei jeder Zeile.
+        if tail.lines.count > AppModel.logLinesKept + 200 { tail.lines.removeFirst(tail.lines.count - AppModel.logLinesKept) }
+        logs[id] = tail
+        // Die Datei bleibt offen, solange der Auftrag läuft (siehe `closeLog`).
+        logFiles.write(clean, id: id, to: paths.logURL(job: id))
+    }
+
+    /// Schließt die Verlaufsdatei eines Auftrags, falls sie offen ist – am Ende des Laufs, und vorsorglich überall,
+    /// wo ein Auftrag aus dem Lauf oder der Liste verschwindet. Mehrfach zu rufen schadet nicht.
+    func closeLog(_ id: String) {
+        logFiles.close(id)
+    }
+
+    /// Beim Beenden des Programms: alle Verlaufsdateien schließen.
+    func closeAllLogs() {
+        logFiles.closeAll()
+    }
+
+    /// Nach einer Zeile, die einen neuen Schritt meldet: nur diesen Auftrag neu lesen, nicht alle.
+    private func reloadJob(_ id: String) {
+        guard let fresh = try? paths.jobs.load(id), let i = jobs.firstIndex(where: { $0.id == id }) else { return reloadJobs() }
+        if jobs[i] != fresh { jobs[i] = fresh }
     }
 
     /// Es läuft immer nur ein Auftrag: alle bauen im selben Toolchain-Ordner und sprechen dasselbe Gerät an.
     private func pump() {
         guard runningTask == nil, let id = queued.first else { return }
         queued.removeFirst()
-        guard let job = try? paths.jobs.load(id) else { return pump() }
+        guard let job = try? paths.jobs.load(id) else { closeLog(id); return pump() }
         runningJob = id
         // Der Mac soll nicht einschlafen, während geladen, gebaut oder kopiert wird.
         if awake == nil {
@@ -1327,11 +1497,12 @@ final class AppModel: ObservableObject {
         let reader = Task { @MainActor in
             for await line in lines {
                 self.append(id, line)
-                if line.hasPrefix("[") { self.reloadJobs() }
+                if line.hasPrefix("[") { self.reloadJob(id) }
             }
         }
+        let metaTool = Probe.metaToolURL
         runningTask = Task.detached {
-            let installer = Installer(recipe: job.recipe, request: job.request, store: paths.store,
+            var installer = Installer(recipe: job.recipe, request: job.request, store: paths.store,
                                       progress: { p in Task { @MainActor in
                                           // Die Verbindungsart kommt einmal am Anfang; die Meldungen danach tragen sie nicht.
                                           var p = p
@@ -1339,6 +1510,7 @@ final class AppModel: ObservableObject {
                                           self.copyProgress[id] = p
                                       } },
                                       report: { feed.yield("    " + $0) })
+            installer.metaTool = metaTool
             let now = (try? Toolchain(root: URL(fileURLWithPath: job.request.toolchain)).commit()) ?? "unbekannt"
             do {
                 _ = try await JobRunner(store: paths.jobs).run(job, currentToolchain: now, log: { feed.yield($0) }) { step, _ in
@@ -1366,6 +1538,7 @@ final class AppModel: ObservableObject {
     private func finished(_ id: String) {
         let cancelled = stopRequested.remove(id) != nil
         if cancelled { _ = try? JobRunner(store: paths.jobs).cancel(id) }
+        closeLog(id)
         runningTask = nil
         runningJob = nil
         copyProgress[id] = nil

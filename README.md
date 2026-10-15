@@ -17,7 +17,7 @@ downloaded that Meta does not confirm you have purchased.
 | Mac | Apple silicon, macOS 14 or later, with [Xcode](https://apps.apple.com/app/xcode/id497799835) and its visionOS platform installed |
 | Headset | Apple Vision Pro, paired with Xcode, Developer Mode on, on the same Wi-Fi as the Mac |
 | Apple account | A paid [Apple Developer Program](https://developer.apple.com/programs/) membership. Free teams do not work: the entitlements the games need are missing. |
-| Meta account | The account that owns the games, and Meta's own command-line tool [`ovr-platform-util`](https://developers.meta.com/horizon/resources/publish-reference-platform-command-line-utility/) (used only to sign in). You download it from Meta's page; the app finds the download and sets it up. |
+| Meta account | The account that owns the games, and Meta's own command-line tool [`ovr-platform-util`](https://developers.meta.com/horizon/resources/publish-reference-platform-command-line-utility/) (used to sign in, to look up the files of a game nobody has tested yet, and as a second way to download a file when Meta's direct address refuses it). You download it from Meta's page; the app finds the download and sets it up. |
 | Controllers | Whatever the game needs – most of these games expect tracked controllers. An ordinary game controller (DualSense, Xbox, …) also works together with your hands: the hands show where they are and pinch to grab, the controller adds both sticks and the buttons. Moss is set up for this. |
 | Disk space | Games are large. Asgard's Wrath 2 alone is about 34 GB on the Mac and again on the headset. |
 
@@ -65,14 +65,37 @@ makes that. Nothing is measured before the panel is first shown. *Advanced* › 
 headset from the start* has it there when the game opens. So that a game does not open its menu along with the
 panel, one of the two buttons alone reaches the game a quarter of a second after you press it.
 
-**Trying the new pose and audio implementations in every game** (from version 1.1.15 with toolchain 507). The
-toolchain carries a second implementation of two things every game runs on – the head pose a game gets for a frame,
-and everything between a game's sound and the output – as test switches that are off. *Settings › Experimental*
-in this app has one switch for both: with it on, every game you install or update has them switched on from the
-start, as if the old ones were gone; in a game each can still be turned off under *Advanced › Test*. Games that
+**Trying the new audio implementation in every game** (from version 1.1.15 with toolchain 507). The toolchain
+carries a second implementation of everything between a game's sound and the output, as a test switch that is off.
+*Settings › Experimental* switches it on from the start in every game you install or update, as if the old one were
+gone; in a game it can still be turned off under *Advanced › Test*. With toolchain 507 the same setting also switches
+on a second head-pose implementation (one pose per frame); newer toolchains use that in every game by default, so
+there the setting only changes the sound. Games that
 are already installed then show "Update available", and **Update All** on the Games page rebuilds them – the same
 again after you turn the setting off. Saved games and data are kept. A game with a toolchain of its own choosing
 is left as it is, and renewing a signature keeps what a build had.
+
+**MetalFX upscaling** (prepared; takes effect with a toolchain that has it). Below 100% *Resolution* a game draws
+a smaller picture that is stretched to the display. Klepton's compositor can do that stretch with Apple's MetalFX
+spatial scaler instead of a linear one – a sharper picture for a little graphics time – and has a switch for it in
+the game (*Settings › Rendering › MetalFX upscaling*, off). *Settings › Experimental › MetalFX* in this app switches
+it on from the start in every game you install or update, the same way as the switch above; off, the default,
+changes nothing. At 100% there is nothing to upscale, so switching it on also sets the resolution a game starts at
+to 75% (a slider below the switch; a value you choose there counts, and switching off brings back the one from before,
+or 100%); what you choose in a game itself counts there, also after an update. It works in every game – Vulkan and GL,
+through Meta's own interface or OpenXR (Half-Life: Alyx, Steam Link, Doom 3, Walkabout, Beat Saber 1.45), with foveated
+rendering on, too; only a picture that cannot be scaled safely keeps the linear stretch, and the game's log says why.
+The metrics panel in the headset (Create + Options held for a second) shows the resolution the game renders at,
+whether MetalFX is upscaling and on which path, and the resolution after it; with the panel shown, a short tap of
+Create + Options together switches MetalFX on and off while the game runs. The bundled toolchain 507 does not have
+it yet; until one does, the setting says so and games are built as usual.
+
+**XR prediction** (a game's page › *Test*; takes effect with a toolchain that has it). Newer toolchains give a game
+its head pose without prediction by default – one pose per frame, as it is when the frame starts, on every path
+(OpenXR and Meta's own interface). The option switches the old behaviour back on for that game, which predicts the
+head to the moment the picture is shown; it applies from the next install or update, to every build, and in the game
+it stays switchable under *Settings › Advanced › Test*. `avpplay install --xr-prediction` does the same. Toolchain 507
+always predicts.
 
 The app speaks English and German. It follows macOS; you can choose a language in its settings (⌘,).
 
@@ -176,6 +199,13 @@ their own recipe.
 - **Meta sign-in** runs through Meta's own tool. AVP Play is only the window in front of it: what you type goes
   to that tool and is not stored. The access token Meta returns is kept in the macOS keychain and nowhere else.
   It is sent only to Meta, only as a request header, and never appears in logs.
+- **Meta's tool** takes the token only as a command-line argument. While it lists a game's files, or downloads
+  one that Meta's direct address refuses with HTTP 404 (it is tried once, then the job stops with the tool's
+  reason), other programs of the same macOS user could see the token. Its own log goes to a folder that is deleted
+  afterwards. When the tool answers "Cannot find apk with ID" – Meta does that to some accounts after many
+  downloads – the app asks Meta for the build's details instead. That query is not in Meta's developer
+  documentation (it is the one the public library OculusGraphQLApiLib calls `GetBinaryDetails`); only the files'
+  IDs, names and sizes are read from the answer.
 - **Steam sign-in** (optional, for Doom 3, Half-Life: Alyx and a Steam copy of Walkabout Mini Golf) runs through Valve's own tool, SteamCMD. The app
   downloads it straight from Valve, checks before every start that the program is signed by Valve, and gives it a
   folder of its own, apart from a Steam you may have installed. Your password and Steam Guard code go to that tool
@@ -262,6 +292,27 @@ The repository:
 | `core/Sources/AVPPlayApp` | the Mac app (SwiftUI) |
 | `core/Sources/avpplay` | a command-line tool with the same functions |
 | `recipes/` | the recipes |
+
+A test copy of a game can sit next to the installed one: give it its own identifier and a name to tell it apart,
+for example `avpplay install moss --team <team ID> --bundle-id com.example.test.moss --display-suffix " (Test)"`
+(or `--display-name <name>` for a whole new name). Signatures are remembered per identifier
+(`.signing/<identifier>.json` in the game's folder), so the test copy doesn't replace the game's own; `renew`,
+`saves` and `servers push` without `--bundle-id` keep using the game's own installation (`.signing.json`, as before).
+
+### A test copy next to the installed game (command line only)
+
+The command-line tool can install a second copy of a game under its own bundle ID, with its own name on the
+Vision Pro, without touching the installed game:
+
+```bash
+avpplay install <id> --team <team ID> --bundle-id com.example.test.<target> --display-suffix " (Test)"
+```
+
+`--display-name <name>` replaces the app's name entirely, `--display-suffix <text>` appends to it; both are
+passed to the toolchain as `KLEPTON_DISPLAY_OVERRIDE` / `KLEPTON_DISPLAY_SUFFIX`. Left out, the name stays as
+usual. The signature of each installation is remembered per bundle ID (`.signing/<bundle ID>.json` in the
+game's folder); `.signing.json` stays the record of the installed game itself, so `renew`, `saves` and
+`servers push` without `--bundle-id` keep working on it. The Mac app has no setting for any of this.
 
 The format of the recipes is described in [docs/recipes.md](docs/recipes.md); how to report a problem or
 contribute in [CONTRIBUTING.md](CONTRIBUTING.md). Code comments are mostly German; everything a user sees is in

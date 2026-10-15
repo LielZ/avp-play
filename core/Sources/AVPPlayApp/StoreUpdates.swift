@@ -224,9 +224,7 @@ extension AppModel {
                 try MetaTool(url: tool).verify()
                 await say(L("Asking Meta's tool for the files of version \(build.version) …",
                             "Metas Werkzeug wird nach den Dateien von Fassung \(build.version) gefragt …"))
-                var files = try MetaListing.list(.build, buildId: build.buildId, tool: tool, token: token)
-                try await Task.sleep(for: .seconds(5))
-                if let assets = try? MetaListing.list(.assets, buildId: build.buildId, tool: tool, token: token) { files += assets }
+                let files = try await MetaListing.files(buildId: build.buildId, tool: tool, token: token, client: meta, say: say)
                 let recipe = try StoreUpdate.make(tested: tested, build: build, files: files)
                 try FileManager.default.createDirectory(at: drafts, withIntermediateDirectories: true)
                 let encoder = JSONEncoder()

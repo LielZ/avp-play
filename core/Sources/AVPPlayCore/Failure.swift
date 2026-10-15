@@ -39,7 +39,7 @@ public enum FailureKind: String, Codable, Sendable {
             case .freeTeamFull: return .apple
             case .appNotInstalled: return .build
             case .badIcon: return .other
-            case .notANativeApp, .wrongArchitecture: return .unsupported
+            case .notANativeApp, .wrongArchitecture, .notAVRGame: return .unsupported
             case .steamAccountMissing: return .signIn
             // Erst vom Gerät entfernen: ein Handgriff dort, wie bei einer App, die gerade läuft.
             case .otherSourceInstalled: return .device
@@ -68,7 +68,7 @@ public enum FailureKind: String, Codable, Sendable {
                 }
             case .notAToolchain, .tooOld, .signingBlocked: return .setup
             }
-        case is FetchError, is URLError: return .download
+        case is FetchError, is URLError, is ToolDownloadError: return .download
         default: return .other
         }
     }

@@ -28,23 +28,126 @@ public struct SigningRecord: Codable, Sendable, Equatable {
         expires.map { $0.addingTimeInterval(-(free ? 2 : 30) * 86_400) }
     }
 
+    /// Der Name, den die Toolchain der App auf dem Gerät gab, wenn er ausdrücklich bestimmt war
+    /// (`KLEPTON_DISPLAY_OVERRIDE` bzw. `KLEPTON_DISPLAY_SUFFIX`) – damit eine Erneuerung ihn beibehält.
+    public var displayName: String?
+    public var displaySuffix: String?
+
+    /// Die Kennung, für die der Eintrag gilt: die gemerkte, sonst – bei Einträgen von vor dieser Angabe – die, unter
+    /// der ein Team dieser Art üblicherweise installiert (wie `Renewal.installedBundle`).
+    public func resolvedBundleId(target: String) -> String {
+        if let bundleId, !bundleId.isEmpty { return bundleId }
+        return free ? Toolchain.bundleId(target: target, prefix: Toolchain.defaultBundlePrefix(freeTeam: team))
+                    : Toolchain.defaultBundleId(target: target)
+    }
+
+    // MARK: Ablage
+    //
+    // Je Kennung ein Eintrag (`.signing/<Kennung>.json` im Ordner des Spiels): Eine Testkopie unter eigener Kennung
+    // überschreibt die Signatur der eigentlichen Installation nicht. Daneben bleibt `.signing.json` der Eintrag der
+    // eigentlichen („live“) Installation – so wie bisher, damit ältere Fassungen dieses Programms ihn weiter lesen.
+    // Was ohne Kennung fragt (Erneuern, Spielstände, Server), bekommt diesen.
+
+    /// Der Eintrag der eigentlichen Installation (bis 1.1.16 der einzige je Spiel).
     public static func url(store: ContentStore, recipe: Recipe) -> URL {
         store.directory(for: recipe).appendingPathComponent(".signing.json")
     }
 
+    /// Der Eintrag für eine Kennung; `nil`, wenn die Kennung als Dateiname nicht taugt.
+    public static func url(store: ContentStore, recipe: Recipe, bundleId: String) -> URL? {
+        guard isSafeBundleId(bundleId) else { return nil }
+        return store.directory(for: recipe).appendingPathComponent(".signing", isDirectory: true)
+            .appendingPathComponent("\(bundleId).json")
+    }
+
+    static func isSafeBundleId(_ id: String) -> Bool {
+        !id.isEmpty && id.count <= 200 && !id.hasPrefix(".") && !id.contains("..")
+            && id.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-") }
+    }
+
+    /// Der Eintrag der eigentlichen Installation. Ein Eintrag aus der Zeit vor der Ablage je Kennung wird dabei
+    /// auch unter seiner Kennung abgelegt (`migrate`).
     public static func load(store: ContentStore, recipe: Recipe) -> SigningRecord? {
-        guard let data = try? Data(contentsOf: url(store: store, recipe: recipe)) else { return nil }
+        guard let record = read(url(store: store, recipe: recipe)) else { return nil }
+        migrate(record, store: store, recipe: recipe)
+        return record
+    }
+
+    /// Der Eintrag für eine Kennung; ohne Kennung der der eigentlichen Installation. Fehlt der eigene Eintrag, gilt
+    /// der der eigentlichen Installation, sofern er dieselbe Kennung hat (ein Eintrag von vor der Ablage je Kennung).
+    /// Liegen beide vor, gilt der jüngere: Eine ältere Fassung dieses Programms schreibt nur `.signing.json`, und
+    /// der Eintrag unter der Kennung wäre dann veraltet. Er wird dabei aufgefrischt (`migrate`).
+    public static func load(store: ContentStore, recipe: Recipe, bundleId: String?) -> SigningRecord? {
+        guard let bundleId else { return load(store: store, recipe: recipe) }
+        let own = url(store: store, recipe: recipe, bundleId: bundleId).flatMap(read)
+        guard let live = read(url(store: store, recipe: recipe)), live.resolvedBundleId(target: recipe.toolchain.target) == bundleId,
+              own.map({ live.installed > $0.installed }) ?? true else { return own }
+        migrate(live, store: store, recipe: recipe)
+        return live
+    }
+
+    /// Legt einen Eintrag der eigentlichen Installation unter seiner Kennung ab, wenn dort noch keiner liegt oder
+    /// nur ein älterer – als Kopie, in einem Zug geschrieben; `.signing.json` bleibt, wie es ist.
+    static func migrate(_ live: SigningRecord, store: ContentStore, recipe: Recipe) {
+        let bundle = live.resolvedBundleId(target: recipe.toolchain.target)
+        guard let target = url(store: store, recipe: recipe, bundleId: bundle) else { return }
+        if let existing = read(target), existing.installed >= live.installed { return }
+        var copy = live
+        copy.bundleId = bundle
+        copy.persist(to: target)
+    }
+
+    /// Speichert den Eintrag unter seiner Kennung und – ist er der der eigentlichen Installation – auch als diesen.
+    /// - Parameter live: `nil` heißt: `isLive` entscheidet. Eine Testkopie unter einer anderen Kennung lässt den
+    ///   Eintrag der eigentlichen Installation so unberührt.
+    public func save(store: ContentStore, recipe: Recipe, live: Bool? = nil) {
+        let target = recipe.toolchain.target
+        let bundle = resolvedBundleId(target: target)
+        let isLive = live ?? isLive(current: Self.read(Self.url(store: store, recipe: recipe)), target: target)
+        var own = self
+        own.bundleId = bundle
+        if let url = Self.url(store: store, recipe: recipe, bundleId: bundle) { own.persist(to: url) }
+        if isLive { persist(to: Self.url(store: store, recipe: recipe)) }
+    }
+
+    /// Ob dieser Eintrag ohne ausdrückliche Angabe der der eigentlichen Installation wird: wenn der bisherige dieselbe
+    /// Kennung hat – oder, gibt es noch keinen, wenn er die übliche Kennung seines Teams trägt. Eine Testkopie unter
+    /// eigener Kennung (`--bundle-id`) wird es also auch dann nicht, wenn das Spiel selbst noch keinen Eintrag hat.
+    func isLive(current: SigningRecord?, target: String) -> Bool {
+        let bundle = resolvedBundleId(target: target)
+        if let current { return current.resolvedBundleId(target: target) == bundle }
+        var usual = self
+        usual.bundleId = nil
+        return usual.resolvedBundleId(target: target) == bundle
+    }
+
+    /// Wohin Fehler beim Ablegen eines Eintrags gehen; ohne Angabe auf die Fehlerausgabe (wie `SigningWarmUp.run`).
+    nonisolated(unsafe) static var note: (String) -> Void = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }
+
+    /// Schreibt den Eintrag; schlägt das fehl, geht der Grund an `note` – die Installation selbst ist dann gelungen.
+    func persist(to url: URL) {
+        do {
+            try write(to: url)
+        } catch {
+            Self.note(L("Could not save the signing record \(url.path): \(error.localizedDescription)",
+                        "Signatur-Eintrag \(url.path) ließ sich nicht speichern: \(error.localizedDescription)"))
+        }
+    }
+
+    static func read(_ url: URL) -> SigningRecord? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(SigningRecord.self, from: data)
     }
 
-    public func save(store: ContentStore, recipe: Recipe) {
+    func write(to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(self) else { return }
-        try? data.write(to: Self.url(store: store, recipe: recipe), options: .atomic)
+        let data = try encoder.encode(self)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
     }
 
     /// Das Ablaufdatum aus einem Bereitstellungsprofil (`embedded.mobileprovision`): eine signierte Hülle um

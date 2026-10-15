@@ -53,6 +53,23 @@ final class ToolchainChoiceTests: XCTestCase {
         XCTAssertEqual(accepted.numberOfMatches(in: stamp, range: NSRange(stamp.startIndex..., in: stamp)), 1)
     }
 
+    /// Die Beschreibung wird gemerkt, aber neu gelesen, sobald sich die Datei ändert oder verschwindet.
+    func testManifestIsReadAgainAfterTheFileChanges() throws {
+        let dir = temp()
+        let toolchain = try plant(manifest(2), at: dir.appendingPathComponent("t"))
+        XCTAssertEqual(toolchain.manifest?.version, 2)
+        XCTAssertEqual(toolchain.manifest?.version, 2)
+        let file = dir.appendingPathComponent("t/toolchain.json")
+        // An Ort und Stelle überschrieben, nicht atomar: dieselbe Datei, anderer Inhalt.
+        try ToolchainPackager.encoder.encode(manifest(3, modified: true)).write(to: file)
+        XCTAssertEqual(toolchain.manifest?.version, 3)
+        XCTAssertTrue(toolchain.isModified)
+        try FileManager.default.removeItem(at: file)
+        XCTAssertNil(toolchain.manifest)
+        try ToolchainPackager.encoder.encode(manifest(1)).write(to: file)
+        XCTAssertEqual(toolchain.manifest?.version, 1)
+    }
+
     func testModifiedMarkIsReadAndWrittenAndOlderDescriptionsStillLoad() throws {
         let dir = temp()
         let packager = ToolchainPackager(root: dir.appendingPathComponent("toolchains"))
@@ -212,6 +229,292 @@ final class ToolchainChoiceTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).experimental)
         request.experimental = true
         XCTAssertEqual(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).experimental, true)
+    }
+
+    // MARK: Das MetalFX-Hochskalieren
+
+    func testTheStampCarriesTheMetalFXBuild() {
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, metalFX: true), "7.4.4")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, modified: true, experimental: true, metalFX: true), "7.4.7")
+        // Ohne die Einstellung bleibt der Stempel, wie er war.
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4), "7.4")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, experimental: true), "7.4.2")
+        XCTAssertEqual(AppStamp.parse("7.4.4"), .init(versionCode: 7, toolchain: 4, modified: false, experimental: false, metalFX: true))
+        XCTAssertEqual(AppStamp.parse("7.4.6"), .init(versionCode: 7, toolchain: 4, modified: false, experimental: true, metalFX: true))
+        XCTAssertEqual(AppStamp.parse("7.4.7"), .init(versionCode: 7, toolchain: 4, modified: true, experimental: true, metalFX: true))
+        XCTAssertEqual(AppStamp.parse("7.4.3")?.metalFX, false)
+        XCTAssertEqual(AppStamp.parse("7.4.8"), .init(versionCode: 7, toolchain: 4, modified: false, experimental: false, metalFX: false))
+    }
+
+    func testABuildThatDiffersFromTheMetalFXSettingCanBeUpdated() {
+        let store = ContentStore(root: temp())
+        let bundle = Toolchain.bundleId(target: "moss", prefix: "com.example")
+        func status(_ installed: String, experimental: Bool? = nil, metalFX: Bool?) -> GameStatus.OnDevice {
+            GameStatus.of(recipe: recipe(), store: store,
+                          apps: [InstalledApp(bundleIdentifier: bundle, name: "Moss", version: "1.0", bundleVersion: installed)],
+                          toolchainVersion: 4, bundlePrefix: "com.example", experimental: experimental, metalFX: metalFX).onDevice
+        }
+        XCTAssertEqual(status("7.4", metalFX: true), .olderToolchain(stamp: "1.0 (7.4)"))
+        XCTAssertEqual(status("7.4.4", metalFX: true), .current(stamp: "1.0 (7.4.4)"))
+        XCTAssertEqual(status("7.4.4", metalFX: false), .olderToolchain(stamp: "1.0 (7.4.4)"))
+        XCTAssertEqual(status("7.4", metalFX: false), .current(stamp: "1.0 (7.4)"))
+        // Beide Einstellungen zugleich: jede für sich verglichen.
+        XCTAssertEqual(status("7.4.6", experimental: true, metalFX: true), .current(stamp: "1.0 (7.4.6)"))
+        XCTAssertEqual(status("7.4.2", experimental: true, metalFX: true), .olderToolchain(stamp: "1.0 (7.4.2)"))
+        // Keine Toolchain, die es kann: kein Vergleich, das Urteil bleibt das bisherige.
+        XCTAssertEqual(status("7.4.4", metalFX: nil), .current(stamp: "1.0 (7.4.4)"))
+    }
+
+    func testOnlyAToolchainWithTheCompositorSwitchAndAnInstallDefaultSupportsMetalFX() throws {
+        let dir = temp()
+        let toolchain = try plant(manifest(4), at: dir)
+        let sources = dir.appendingPathComponent("visionos/Sources")
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        try "KLEPTON_TEST_ON".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsMetalFX)
+        // Klepton PR #2 allein: der Schalter im Spiel, aber nichts, womit eine Installation ihn vorbelegt.
+        try "UserDefaults.standard.bool(forKey: \"klepton.metalfxUpscale\")"
+            .write(to: sources.appendingPathComponent("KleptonCompositor.swift"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsMetalFX)
+        try "onFromInstall.contains(\"\(Toolchain.metalFXSwitch)\")"
+            .write(to: sources.appendingPathComponent("KleptonTuning.swift"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(toolchain.supportsMetalFX)
+        // Ohne KLEPTON_TEST_ON kommt der Name nicht ins Spiel.
+        try "".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsMetalFX)
+    }
+
+    func testAnInstallRequestWithoutTheFieldHasNoMetalFX() throws {
+        var request = InstallRequest(toolchain: "/tmp/t")
+        let old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        XCTAssertNil(old?["metalFX"])
+        XCTAssertNil(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).metalFX)
+        request.metalFX = true
+        XCTAssertEqual(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).metalFX, true)
+        XCTAssertNil(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).resolution)
+        request.resolution = 75
+        XCTAssertEqual(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).resolution, 75)
+    }
+
+    // MARK: Die Auflösung zum MetalFX-Schalter
+
+    func testSwitchingMetalFXOnPresetsTheResolution() {
+        let on = MetalFXResolution.switched(metalFX: true, was: false, state: .init(resolution: 100))
+        XCTAssertEqual(on, .init(resolution: 75, before: 100))
+        // Ein eigener Wert von vorher wird gemerkt.
+        XCTAssertEqual(MetalFXResolution.switched(metalFX: true, was: false, state: .init(resolution: 90)),
+                       .init(resolution: 75, before: 90))
+    }
+
+    func testThePlayersOwnValueCountsWhileMetalFXStaysOn() {
+        // Der Spieler ändert die Vorbelegung; ein erneutes Setzen desselben Schalterstands lässt sie stehen.
+        let changed = MetalFXResolution.State(resolution: 60, before: 100)
+        XCTAssertEqual(MetalFXResolution.switched(metalFX: true, was: true, state: changed), changed)
+        XCTAssertEqual(MetalFXResolution.switched(metalFX: false, was: false, state: .init(resolution: 85)),
+                       .init(resolution: 85))
+    }
+
+    func testSwitchingMetalFXOffRestoresThePreviousValueOrFull() {
+        XCTAssertEqual(MetalFXResolution.switched(metalFX: false, was: true, state: .init(resolution: 60, before: 90)),
+                       .init(resolution: 90))
+        XCTAssertEqual(MetalFXResolution.switched(metalFX: false, was: true, state: .init(resolution: 75)),
+                       .init(resolution: 100))
+        // Ein, aus, ein: wieder 75, und davor gilt der Wert, der nach dem Ausschalten stand.
+        var state = MetalFXResolution.State(resolution: 80)
+        state = MetalFXResolution.switched(metalFX: true, was: false, state: state)
+        state.resolution = 55
+        state = MetalFXResolution.switched(metalFX: false, was: true, state: state)
+        XCTAssertEqual(state, .init(resolution: 80))
+        XCTAssertEqual(MetalFXResolution.switched(metalFX: true, was: false, state: state), .init(resolution: 75, before: 80))
+    }
+
+    func testTheResolutionHandedToTheToolchain() {
+        XCTAssertEqual(MetalFXResolution.environmentValue(75), "0.75")
+        XCTAssertEqual(MetalFXResolution.environmentValue(50), "0.50")
+        // 100 % und ohne Angabe: keine Vorgabe, es bleibt bei der des Targets.
+        XCTAssertNil(MetalFXResolution.environmentValue(100))
+        XCTAssertNil(MetalFXResolution.environmentValue(nil))
+        // Außerhalb des Bereichs oder zwischen den Schritten: auf den nächsten gültigen Wert.
+        XCTAssertEqual(MetalFXResolution.environmentValue(10), "0.50")
+        XCTAssertNil(MetalFXResolution.environmentValue(140))
+        XCTAssertEqual(MetalFXResolution.environmentValue(73), "0.75")
+    }
+
+    func testOnlyAToolchainThatReadsItCanPresetTheResolution() throws {
+        let dir = temp()
+        let toolchain = try plant(manifest(4), at: dir)
+        try "KLEPTON_TEST_ON".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsRenderScalePreset)
+        try "KLEPTON_TEST_ON \(Toolchain.renderScaleVariable)"
+            .write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(toolchain.supportsRenderScalePreset)
+    }
+
+    /// Gegen einen echten Klepton-Stand (Klepton PR #4): `AVPPLAY_KLEPTON_CHECKOUT=<Klon>` – sonst übersprungen.
+    func testAKleptonCheckoutWithTheInstallSwitchesIsRecognised() throws {
+        guard let path = ProcessInfo.processInfo.environment["AVPPLAY_KLEPTON_CHECKOUT"] else {
+            throw XCTSkip("AVPPLAY_KLEPTON_CHECKOUT not set")
+        }
+        let toolchain = try Toolchain(root: URL(fileURLWithPath: path))
+        XCTAssertTrue(toolchain.supportsMetalFX)
+        XCTAssertTrue(toolchain.supportsRenderScalePreset)
+    }
+
+    func testTheStampCarriesTheStartingResolution() {
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, metalFX: true, resolution: 75), "7.4.44")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, experimental: true, metalFX: true, resolution: 50), "7.4.86")
+        // Ohne MetalFX und bei 100 % kein Vermerk.
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, resolution: 75), "7.4")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, metalFX: true, resolution: 100), "7.4.4")
+        XCTAssertEqual(AppStamp.parse("7.4.44"),
+                       .init(versionCode: 7, toolchain: 4, modified: false, experimental: false, metalFX: true, resolution: 75))
+        XCTAssertEqual(AppStamp.parse("7.4.87"),
+                       .init(versionCode: 7, toolchain: 4, modified: true, experimental: true, metalFX: true, resolution: 50))
+        XCTAssertNil(AppStamp.parse("7.4.4")?.resolution)
+        for percent in stride(from: 50, through: 95, by: 5) {
+            let stamp = AppStamp.build(versionCode: 1, toolchainVersion: 2, metalFX: true, resolution: percent)
+            XCTAssertEqual(AppStamp.parse(stamp)?.resolution, percent, stamp)
+        }
+        // Eine Stufe ohne MetalFX oder jenseits von 50 % stammt nicht von hier und sagt nichts.
+        XCTAssertEqual(AppStamp.parse("7.4.40"), .init(versionCode: 7, toolchain: 4, modified: false))
+        XCTAssertEqual(AppStamp.parse("7.4.92"), .init(versionCode: 7, toolchain: 4, modified: false))
+    }
+
+    func testTheCommandLineWarnsAboutAResolutionItCannotUse() {
+        // Ohne --metalfx: nicht übernommen, aber gesagt.
+        let alone = MetalFXResolution.commandLine(metalFX: false, value: "60")
+        XCTAssertNil(alone.resolution)
+        XCTAssertTrue(alone.warning?.contains("--metalfx") == true)
+        XCTAssertEqual(MetalFXResolution.commandLine(metalFX: false, value: nil).warning, nil)
+        // Mit --metalfx: ohne Angabe die Vorbelegung, ein gültiger Wert still.
+        XCTAssertEqual(MetalFXResolution.commandLine(metalFX: true, value: nil).resolution, 75)
+        XCTAssertNil(MetalFXResolution.commandLine(metalFX: true, value: nil).warning)
+        XCTAssertEqual(MetalFXResolution.commandLine(metalFX: true, value: "60").resolution, 60)
+        XCTAssertNil(MetalFXResolution.commandLine(metalFX: true, value: "60").warning)
+        // Was so nicht geht, wird angepasst und gesagt.
+        let low = MetalFXResolution.commandLine(metalFX: true, value: "30")
+        XCTAssertEqual(low.resolution, 50)
+        XCTAssertNotNil(low.warning)
+        XCTAssertEqual(MetalFXResolution.commandLine(metalFX: true, value: "73").resolution, 75)
+        XCTAssertNotNil(MetalFXResolution.commandLine(metalFX: true, value: "73").warning)
+        let word = MetalFXResolution.commandLine(metalFX: true, value: "high")
+        XCTAssertEqual(word.resolution, 75)
+        XCTAssertNotNil(word.warning)
+    }
+
+    func testRenewalKeepsTheStartingResolutionOfTheBuild() {
+        func renewed(_ stamp: String) -> InstallRequest {
+            var request = InstallRequest(toolchain: "/tmp/t")
+            Renewal.keepBuild(AppStamp.parse(stamp), in: &request)
+            return request
+        }
+        XCTAssertEqual(renewed("7.4.68").resolution, 60)
+        XCTAssertEqual(renewed("7.4.68").metalFX, true)
+        XCTAssertEqual(renewed("7.4.46").experimental, true)
+        XCTAssertEqual(renewed("7.4.46").resolution, 75)
+        // Ein MetalFX-Bau ohne Vorgabe bleibt ohne – nie die 75 % der Einstellung.
+        XCTAssertEqual(renewed("7.4.4").metalFX, true)
+        XCTAssertNil(renewed("7.4.4").resolution)
+        XCTAssertNil(renewed("7.4").metalFX)
+        XCTAssertNil(renewed("7.4").resolution)
+        XCTAssertNil(renewed("7.4.2").resolution)
+    }
+
+    // MARK: Die XR-Vorhersage (Test-Option je Spiel)
+
+    func testTheStampCarriesTheXRPrediction() {
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, xrPrediction: true), "7.4.128")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, modified: true, experimental: true, metalFX: true,
+                                      resolution: 50, xrPrediction: true), "7.4.215")
+        // Ohne die Option bleibt der Stempel, wie er war.
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, metalFX: true, resolution: 75), "7.4.44")
+        XCTAssertEqual(AppStamp.parse("7.4.128"),
+                       .init(versionCode: 7, toolchain: 4, modified: false, xrPrediction: true))
+        XCTAssertEqual(AppStamp.parse("7.4.215"),
+                       .init(versionCode: 7, toolchain: 4, modified: true, experimental: true, metalFX: true, resolution: 50,
+                             xrPrediction: true))
+        XCTAssertEqual(AppStamp.parse("7.4.44")?.xrPrediction, false)
+        // Eine Stufe ohne MetalFX bleibt ungültig, auch mit dem Bit der Vorhersage; darüber stammt nichts von hier.
+        XCTAssertEqual(AppStamp.parse("7.4.168"), .init(versionCode: 7, toolchain: 4, modified: false))
+        XCTAssertEqual(AppStamp.parse("7.4.256"), .init(versionCode: 7, toolchain: 4, modified: false))
+        for percent in stride(from: 50, through: 100, by: 5) {
+            let stamp = AppStamp.build(versionCode: 1, toolchainVersion: 2, metalFX: true, resolution: percent, xrPrediction: true)
+            XCTAssertEqual(AppStamp.parse(stamp)?.xrPrediction, true, stamp)
+            XCTAssertEqual(AppStamp.parse(stamp)?.resolution, percent == 100 ? nil : percent, stamp)
+        }
+    }
+
+    func testABuildThatDiffersFromTheGamesXRPredictionOptionCanBeUpdated() {
+        let store = ContentStore(root: temp())
+        let bundle = Toolchain.bundleId(target: "moss", prefix: "com.example")
+        func status(_ installed: String, metalFX: Bool? = nil, xrPrediction: Bool?,
+                    pin: ToolchainChoices.Pin? = nil) -> GameStatus.OnDevice {
+            GameStatus.of(recipe: recipe(), store: store,
+                          apps: [InstalledApp(bundleIdentifier: bundle, name: "Moss", version: "1.0", bundleVersion: installed)],
+                          toolchainVersion: 4, pin: pin, bundlePrefix: "com.example", metalFX: metalFX,
+                          xrPrediction: xrPrediction).onDevice
+        }
+        XCTAssertEqual(status("7.4", xrPrediction: true), .olderToolchain(stamp: "1.0 (7.4)"))
+        XCTAssertEqual(status("7.4.128", xrPrediction: true), .current(stamp: "1.0 (7.4.128)"))
+        XCTAssertEqual(status("7.4.128", xrPrediction: false), .olderToolchain(stamp: "1.0 (7.4.128)"))
+        XCTAssertEqual(status("7.4", xrPrediction: false), .current(stamp: "1.0 (7.4)"))
+        // Zusammen mit MetalFX: jede für sich verglichen.
+        XCTAssertEqual(status("7.4.172", metalFX: true, xrPrediction: true), .current(stamp: "1.0 (7.4.172)"))
+        XCTAssertEqual(status("7.4.44", metalFX: true, xrPrediction: true), .olderToolchain(stamp: "1.0 (7.4.44)"))
+        // Keine Toolchain, die es kann, oder eine für das Spiel gewählte: kein Vergleich.
+        XCTAssertEqual(status("7.4.128", xrPrediction: nil), .current(stamp: "1.0 (7.4.128)"))
+        XCTAssertEqual(status("7.4", xrPrediction: true, pin: .init(version: 4, commit: "abc")),
+                       .current(stamp: "1.0 (7.4)"))
+    }
+
+    func testRenewalKeepsTheXRPrediction() {
+        func renewed(_ stamp: String) -> InstallRequest {
+            var request = InstallRequest(toolchain: "/tmp/t")
+            Renewal.keepBuild(AppStamp.parse(stamp), in: &request)
+            return request
+        }
+        XCTAssertEqual(renewed("7.4.128").xrPrediction, true)
+        XCTAssertEqual(renewed("7.4.172").xrPrediction, true)
+        XCTAssertEqual(renewed("7.4.172").resolution, 75)
+        XCTAssertNil(renewed("7.4.44").xrPrediction)
+        XCTAssertNil(renewed("7.4").xrPrediction)
+    }
+
+    func testOnlyAToolchainWithTheTestSwitchSupportsXRPrediction() throws {
+        let dir = temp()
+        let toolchain = try plant(manifest(4), at: dir)
+        let sources = dir.appendingPathComponent("visionos/Sources")
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        try "KLEPTON_TEST_ON".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsXRPrediction)
+        // Toolchain 507: KL_XR_PREDICT nur als Variable der Laufzeit, kein Test-Schalter – sie sagt immer voraus.
+        try "kl_openxr_set_predict(kl_openxr_predict() != 0 ? 0 : 1) // KL_XR_PREDICT"
+            .write(to: sources.appendingPathComponent("KleptonTuning.swift"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsXRPrediction)
+        try "Entry(env: \"\(Toolchain.xrPredictionSwitch)\", value: \"1\","
+            .write(to: sources.appendingPathComponent("KleptonTuning.swift"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(toolchain.supportsXRPrediction)
+        // Ohne KLEPTON_TEST_ON kommt der Name nicht ins Spiel.
+        try "".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsXRPrediction)
+    }
+
+    func testAnInstallRequestWithoutTheFieldHasNoXRPrediction() throws {
+        var request = InstallRequest(toolchain: "/tmp/t")
+        let old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        XCTAssertNil(old?["xrPrediction"])
+        XCTAssertNil(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).xrPrediction)
+        request.xrPrediction = true
+        XCTAssertEqual(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).xrPrediction, true)
+    }
+
+    /// Gegen einen echten Klepton-Stand mit der XR-Vorhersage als Test-Schalter: `AVPPLAY_KLEPTON_CHECKOUT=<Klon>` –
+    /// sonst übersprungen.
+    func testAKleptonCheckoutWithTheXRPredictionSwitchIsRecognised() throws {
+        guard let path = ProcessInfo.processInfo.environment["AVPPLAY_KLEPTON_CHECKOUT"] else {
+            throw XCTSkip("AVPPLAY_KLEPTON_CHECKOUT not set")
+        }
+        XCTAssertTrue(try Toolchain(root: URL(fileURLWithPath: path)).supportsXRPrediction)
     }
 
     // MARK: Was zur Wahl steht

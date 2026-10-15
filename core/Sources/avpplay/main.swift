@@ -28,6 +28,11 @@ struct Options {
     func value(_ name: String) -> String? { values[name]?.last }
 }
 
+/// Ein Hinweis auf stderr, ohne abzubrechen.
+func warn(_ message: String) {
+    FileHandle.standardError.write(Data((L("Warning: ", "Warnung: ") + Redaction.redact(message) + "\n").utf8))
+}
+
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((Redaction.redact(message) + "\n").utf8))
     exit(1)
@@ -44,6 +49,12 @@ func recipesDirectory(_ o: Options) -> URL {
     }
     fail(L("No recipes folder found. Give one with --recipes <folder>.",
            "Kein Rezeptordner gefunden. Mit --recipes <Ordner> angeben."))
+}
+
+/// Metas Werkzeug für den Ausweg bei HTTP 404: `--tool`, sonst die Kopie der App, sonst `~/Downloads`.
+func metaToolURL(_ o: Options) -> URL {
+    if let p = o.value("tool") { return URL(fileURLWithPath: p) }
+    return FileManager.default.fileExists(atPath: MetaTool.installedURL.path) ? MetaTool.installedURL : MetaTool.defaultURL
 }
 
 func contentStore(_ o: Options) -> ContentStore {
@@ -90,6 +101,7 @@ avpplay – command line for the AVP Play core library
   avpplay logout                               delete the stored Meta token
   avpplay account                              check the stored Meta token
   avpplay owns <id>                            does the account own the game?
+  avpplay files <build ID> [--details]         the files of a build (Meta's tool; its build details if the tool can't find it)
   avpplay steam setup|login <name>|logout      Valve's SteamCMD: fetch it, sign in to Steam (you type the password into Valve's tool), sign out
   avpplay steam fetch <id> --steam-account <name> [--with <file name>]   get the files a recipe needs from your own Steam purchase
   avpplay purchases <id>                       confirmed in-game purchases and the add-on content that goes with them
@@ -123,14 +135,24 @@ avpplay – command line for the AVP Play core library
   avpplay job resume <job>                     resume an interrupted or stopped job
   avpplay job show|cancel <job>                show progress / cancel            avpplay jobs   all jobs
              --device <UDID>  --bundle-id <ID>  --toolchain <folder>  --no-addons
+             --display-name <name>   name of the app on the Vision Pro instead of the game's usual one
+             --display-suffix <text> append this to the app's name, e.g. " (Test)" – with --bundle-id for a test copy
+                                     next to the installed game; its signature is kept apart and doesn't replace
+                                     the game's (renew, saves and servers keep using the game's own installation)
              --source steam          the game as bought on Steam instead of from the Meta Store (where the project has a
                                      recipe for it); needs --steam-account <name>
              --icon <image file>     use your own app icon (takes priority over everything else)
              --no-store-art          don't fetch the cover image from the store page (the icon from the APK is used instead)
              --replace-running       install even if the game is running (it will be quit)
              --controller-mode <standard|surreal>  initial controller mode (pair on Vision Pro)
-             --experimental          build with the toolchain's new pose and audio implementations switched on from the start
-                                     (they can be turned off in the game; the app's setting “Experimental” does the same)
+             --experimental          build with the toolchain's new audio implementation switched on from the start (and, with
+                                     toolchain 507, its one-head-pose-per-frame implementation, which newer toolchains use anyway;
+                                     off in the game under Advanced › Test; the app's setting “Experimental” does the same)
+             --metalfx               build with the compositor's MetalFX upscaling switched on from the start (sharpens the picture
+                                     when the game's resolution is below 100%; off in the game under Settings › Rendering)
+             --resolution <percent>  with --metalfx: the resolution the game starts at (default 75; 100: the game's own)
+             --xr-prediction         build with XR head prediction switched on from the start (off by default; in the game under
+                                     Settings › Advanced › Test; the game page's option “XR prediction” does the same)
              --addons-only           job start: only sync purchased add-on content of an installed game (no build, no --team)
              --download-only         job start: only download the files (needs no Xcode, toolchain, --team or device)
              --build-only            job start: check, download, build and install the app, but do not copy the game data yet
@@ -151,6 +173,7 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay logout                               hinterlegten Meta-Token löschen
   avpplay account                              hinterlegten Meta-Token prüfen
   avpplay owns <id>                            Besitzt das Konto das Spiel?
+  avpplay files <Build-ID> [--details]         die Dateien eines Builds (Metas Werkzeug; findet es ihn nicht, die Build-Details)
   avpplay steam setup|login <Name>|logout      Valves SteamCMD: holen, bei Steam anmelden (das Passwort tippst du in Valves Werkzeug), abmelden
   avpplay steam fetch <id> --steam-account <Name> [--with <Dateiname>]   die Dateien eines Rezepts aus dem eigenen Steam-Kauf holen
   avpplay purchases <id>                       bestätigte Käufe im Spiel und zugehörige Zusatzinhalte
@@ -185,6 +208,10 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
   avpplay job resume <Auftrag>                 unterbrochenen oder angehaltenen Auftrag fortsetzen
   avpplay job show|cancel <Auftrag>            Stand zeigen / abbrechen          avpplay jobs   alle Aufträge
              --device <UDID>  --bundle-id <ID>  --toolchain <Ordner>  --no-addons
+             --display-name <Name>   Name der App auf der Vision Pro statt des üblichen des Spiels
+             --display-suffix <Text> das an den Namen der App anhängen, z. B. " (Test)" – mit --bundle-id für eine Testkopie
+                                     neben dem installierten Spiel; ihre Signatur wird getrennt gemerkt und ersetzt nicht
+                                     die des Spiels (renew, saves und servers bleiben bei dessen eigener Installation)
              --source steam          das Spiel aus dem Steam-Kauf statt aus dem Meta-Store (wo das Projekt ein Rezept
                                      dafür führt); braucht --steam-account <Name>
              --icon <Bilddatei>      eigenes App-Icon hinterlegen (hat Vorrang vor allem anderen)
@@ -192,8 +219,14 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
              --replace-running       auch installieren, wenn das Spiel gerade läuft (es wird dabei beendet)
              --restore-saves         nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat
              --controller-mode <standard|surreal>  anfänglicher Controllermodus (auf Vision Pro koppeln)
-             --experimental          mit von Anfang an eingeschalteter neuer Pose- und Audio-Implementierung der Toolchain bauen
-                                     (im Spiel abschaltbar; die Einstellung „Experimentell“ des Programms tut dasselbe)
+             --experimental          mit von Anfang an eingeschalteter neuer Audio-Implementierung der Toolchain bauen (mit Toolchain
+                                     507 auch der Implementierung mit einer Kopfpose pro Frame, die neuere Toolchains ohnehin benutzen;
+                                     im Spiel abschaltbar unter Erweitert › Test; die Einstellung „Experimentell“ tut dasselbe)
+             --metalfx               mit von Anfang an eingeschaltetem MetalFX-Hochskalieren des Compositors bauen (schärft das Bild,
+                                     wenn die Auflösung des Spiels unter 100 % steht; im Spiel abschaltbar unter Einstellungen › Rendering)
+             --resolution <Prozent>  mit --metalfx: die Auflösung, mit der das Spiel beginnt (Vorgabe 75; 100: die des Spiels)
+             --xr-prediction         mit von Anfang an eingeschalteter XR-Vorhersage der Kopfpose bauen (sonst aus; im Spiel unter
+                                     Einstellungen › Erweitert › Test; die Option „XR-Vorhersage“ auf der Seite des Spiels tut dasselbe)
              --addons-only           job start: nur gekaufte Zusatzinhalte eines installierten Spiels abgleichen (kein Bau, kein --team)
              --download-only         job start: nur die Dateien laden (braucht weder Xcode noch Toolchain, --team oder Gerät)
              --build-only            job start: prüfen, laden, bauen und die App installieren, aber die Spieldaten noch nicht kopieren
@@ -209,7 +242,7 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 }
 
 let valued: Set<String> = ["account", "steam-account", "source", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
-                           "team", "device", "bundle-id", "toolchain", "controller-mode", "icon", "tool", "jobs", "toolchains", "saves"]
+                           "team", "device", "bundle-id", "display-name", "display-suffix", "toolchain", "controller-mode", "icon", "tool", "jobs", "toolchains", "saves", "resolution"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
 OtherSources.use(recipes: recipesDirectory(o))
@@ -282,12 +315,25 @@ func installRequest(_ o: Options, recipe id: String? = nil) -> InstallRequest {
     request.team = o.value("team")
     request.device = o.value("device")
     request.bundleId = o.value("bundle-id")
+    for key in ["display-name", "display-suffix"] {
+        if let text = o.value(key), !Toolchain.isValidDisplayText(text) {
+            fail(L("--\(key): at most 60 characters, no line breaks or other control characters.",
+                   "--\(key): höchstens 60 Zeichen, keine Zeilenumbrüche oder anderen Steuerzeichen."))
+        }
+    }
+    request.displayName = o.value("display-name").flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+    request.displaySuffix = o.value("display-suffix").flatMap { $0.isEmpty ? nil : $0 }
     request.steamAccount = o.value("steam-account")
     request.customIcon = o.value("icon").map { URL(fileURLWithPath: $0).standardizedFileURL.path }
     request.storeArt = !o.flags.contains("no-store-art")
     if o.flags.contains("replace-running") { request.replaceRunning = true }
     if o.flags.contains("restore-saves") { request.restoreSaves = true }
     if o.flags.contains("experimental") { request.experimental = true }
+    if o.flags.contains("metalfx") { request.metalFX = true }
+    if o.flags.contains("xr-prediction") { request.xrPrediction = true }
+    let resolution = MetalFXResolution.commandLine(metalFX: request.metalFX == true, value: o.value("resolution"))
+    request.resolution = resolution.resolution
+    if let warning = resolution.warning { warn(warning) }
     if let value = o.value("controller-mode") {
         guard let mode = ControllerMode(rawValue: value) else {
             fail(L("--controller-mode must be standard or surreal", "--controller-mode muss standard oder surreal sein"))
@@ -463,6 +509,26 @@ case "owns":
     }
     catch { fail("\(error)") }
 
+case "files":
+    // Die Dateien eines Builds, wie die App sie für ein ungeprüftes Spiel nachschlägt. Mit --details nur über
+    // Metas Build-Details (MetaClient.buildFiles), ohne das Werkzeug.
+    guard o.positional.count > 1, CatalogGame.isIdentifier(o.positional[1]) else { fail(L("A build ID is missing.", "Build-Kennung fehlt.")) }
+    let (client, _) = await signedIn(o)
+    do {
+        let build = o.positional[1]
+        let files: [ListedFile]
+        if o.flags.contains("details") {
+            files = try await client.buildFiles(buildId: build)
+        } else {
+            let token = try TokenStore().read(account: o.value("account") ?? "default")
+            try MetaTool(url: metaToolURL(o)).verify()
+            files = try await MetaListing.files(buildId: build, tool: metaToolURL(o), token: token, client: client) { print($0) }
+        }
+        if files.isEmpty { print(L("No files named.", "Keine Dateien genannt.")) }
+        for f in files { print("  \(f.kind)  \(f.name)  \(f.sizeText)  \(f.id)") }
+    }
+    catch { fail("\(error)") }
+
 case "content-identity":
     // Was die Auslieferung über eine Datei sagt, ohne sie zu laden (MetaClient.identity) – zum Nachsehen.
     guard o.positional.count > 1, CatalogGame.isIdentifier(o.positional[1]) else { fail(L("A file ID is missing.", "Datei-Kennung fehlt.")) }
@@ -582,7 +648,12 @@ case "plan", "fetch":
     }
     let interval = Double(o.value("interval") ?? "") ?? 0
     // Ohne Meta-Dateien wird der Client nie benutzt; er bekommt dann auch keinen Token.
-    let fetcher = Fetcher(client: client ?? MetaClient(token: "unbenutzt"), store: store, gate: RequestGate(minInterval: .seconds(interval)))
+    var fetcher = Fetcher(client: client ?? MetaClient(token: "unbenutzt"), store: store, gate: RequestGate(minInterval: .seconds(interval)))
+    // Verweigert die direkte Adresse eine Datei des Spiels (HTTP 404), wird es einmal über Metas Werkzeug versucht.
+    if client != nil, let token = try? TokenStore().read(account: o.value("account") ?? "default"),
+       (try? MetaTool(url: metaToolURL(o)).verify()) != nil {
+        fetcher.toolFallback = MetaToolDownload(tool: metaToolURL(o), token: token)
+    }
     do {
         let summary = try await fetcher.run(plan, recipe: r) { print("  " + $0) }
         print(L("Done: \(summary.downloaded) downloaded (\(gigabytes(summary.bytes))), \(summary.kept) were already there.",
@@ -723,7 +794,8 @@ case "install", "stage":
     let copying = CopyProgressPrinter()
     var request = installRequest(o, recipe: r.id)
     request.otherSourceBuilds = otherSourceBuilds(of: r, o)
-    let installer = Installer(recipe: r, request: request, store: contentStore(o), progress: { copying.show($0) }) { print($0) }
+    var installer = Installer(recipe: r, request: request, store: contentStore(o), progress: { copying.show($0) }) { print($0) }
+    installer.metaTool = metaToolURL(o)
     do {
         for step in (command == "install" ? [.account, .build, .stage, .unlock] : [.account, .stage, .unlock]) as [InstallStep] {
             try await installer.perform(step)
@@ -990,7 +1062,8 @@ case "job":
     let jobs = jobStore(o)
     let runner = JobRunner(store: jobs)
     func run(_ job: Job) async {
-        let installer = Installer(recipe: job.recipe, request: job.request, store: contentStore(o)) { print("  " + $0) }
+        var installer = Installer(recipe: job.recipe, request: job.request, store: contentStore(o)) { print("  " + $0) }
+        installer.metaTool = metaToolURL(o)
         do {
             let now = (try? Toolchain(root: URL(fileURLWithPath: job.request.toolchain)).commit()) ?? L("unknown", "unbekannt")
             let done = try await runner.run(job, currentToolchain: now, log: { print($0) }) { step, _ in try await installer.perform(step) }

@@ -6,8 +6,6 @@ import SwiftUI
 struct GamesView: View {
     @EnvironmentObject var model: AppModel
 
-    private var shown: [Game] { model.shownGames }
-
     /// Die Filter der Übersicht, als einzelne Ansichten: für eine Zeile oder zum Umbrechen.
     @ViewBuilder private var filterToggles: some View {
         Text(L("Show only:", "Nur zeigen:")).foregroundStyle(.secondary)
@@ -39,8 +37,9 @@ struct GamesView: View {
             ProgressView().controlSize(.small)
             Text(L("Searching the catalogue …", "Katalog wird durchsucht …")).font(.callout).foregroundStyle(.secondary)
         }
-        if model.updatable.count > 1 {
-            Button(L("Update All (\(model.updatable.count))", "Alle aktualisieren (\(model.updatable.count))")) { model.updateAll() }
+        let updatable = model.updatable.count
+        if updatable > 1 {
+            Button(L("Update All (\(updatable))", "Alle aktualisieren (\(updatable))")) { model.updateAll() }
         }
         if model.checkingOwnership {
             ProgressView().controlSize(.small)
@@ -49,6 +48,8 @@ struct GamesView: View {
     }
 
     var body: some View {
+        // Einmal je Neuzeichnen gefiltert und sortiert (und im Modell gemerkt, bis sich etwas ändert).
+        let shown = model.shownGames
         NavigationStack(path: $model.gamePath) {
             ScrollView {
                 if model.loadProblem == nil, !model.games.isEmpty {
@@ -237,6 +238,9 @@ struct TrustBadge: View {
 
     var body: some View {
         let (text, symbol, color, help): (String, String, Color, String) = {
+            if game.flatApp {
+                return (L("2D App", "2D-App"), "rectangle.on.rectangle", .gray, InstallError.notAVRGame.description)
+            }
             switch game.trust {
             case .verified:
                 return (L("Verified", "Geprüft"), "checkmark.seal.fill", .blue,
@@ -610,13 +614,13 @@ struct GameDetail: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 6) {
+                        let blocked = model.blocker(for: game)
                         Button(action: { model.install(game) }) {
                             Text(actionTitle).frame(minWidth: 150)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(model.blocker(for: game) != nil)
-                        let blocked = model.blocker(for: game)
+                        .disabled(blocked != nil)
                         if let why = blocked {
                             Text(why).font(.callout).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.trailing).frame(maxWidth: 280, alignment: .trailing)
@@ -731,6 +735,8 @@ struct GameDetail: View {
                 if !languageFiles.isEmpty || game.recipe.addons != nil || !extras.isEmpty { optionalContent }
 
                 if game.recipe.servers != nil { ServerListBox(game: game) }
+
+                testOptions
 
                 if game.installed { FeedbackBox(game: game) }
 
@@ -888,10 +894,26 @@ struct GameDetail: View {
             if let built = game.status.builtWith, let wanted = model.experimentalExpected, built.experimental != wanted,
                built.toolchain >= (model.toolchainRevision ?? 0) {
                 return wanted
-                    ? L("Installed, without the new pose and audio implementations that the experimental setting asks for – “Update” builds it with them switched on; saved games and data are kept.",
-                        "Installiert, ohne die neue Pose- und Audio-Implementierung, die die experimentelle Einstellung verlangt – „Aktualisieren“ baut es mit beiden eingeschaltet; Spielstände und Daten bleiben.")
-                    : L("Installed with the new pose and audio implementations switched on; the experimental setting is off now – “Update” builds it without them; saved games and data are kept.",
-                        "Installiert mit eingeschalteter neuer Pose- und Audio-Implementierung; die experimentelle Einstellung ist jetzt aus – „Aktualisieren“ baut es ohne sie; Spielstände und Daten bleiben.")
+                    ? L("Installed, without the new audio implementation that the experimental setting asks for – “Update” builds it with it switched on; saved games and data are kept.",
+                        "Installiert, ohne die neue Audio-Implementierung, die die experimentelle Einstellung verlangt – „Aktualisieren“ baut es mit ihr eingeschaltet; Spielstände und Daten bleiben.")
+                    : L("Installed with the new audio implementation switched on; the experimental setting is off now – “Update” builds it without; saved games and data are kept.",
+                        "Installiert mit eingeschalteter neuer Audio-Implementierung; die experimentelle Einstellung ist jetzt aus – „Aktualisieren“ baut es ohne sie; Spielstände und Daten bleiben.")
+            }
+            if let built = game.status.builtWith, let wanted = model.metalFXExpected, built.metalFX != wanted,
+               built.toolchain >= (model.toolchainRevision ?? 0) {
+                return wanted
+                    ? L("Installed, without the MetalFX upscaling the setting asks for – “Update” builds it with upscaling on from the start; saved games and data are kept.",
+                        "Installiert, ohne das MetalFX-Hochskalieren, das die Einstellung verlangt – „Aktualisieren“ baut es mit von Anfang an eingeschaltetem Hochskalieren; Spielstände und Daten bleiben.")
+                    : L("Installed with MetalFX upscaling on from the start; the setting is off now – “Update” builds it without; saved games and data are kept.",
+                        "Installiert mit von Anfang an eingeschaltetem MetalFX-Hochskalieren; die Einstellung ist jetzt aus – „Aktualisieren“ baut es ohne; Spielstände und Daten bleiben.")
+            }
+            if let built = game.status.builtWith, let wanted = model.xrPredictionExpected(for: game.id), built.xrPrediction != wanted,
+               built.toolchain >= (model.toolchainRevision ?? 0) {
+                return wanted
+                    ? L("Installed, without the XR prediction this game's Test option asks for – “Update” builds it with prediction on; saved games and data are kept.",
+                        "Installiert, ohne die XR-Vorhersage, die die Test-Option dieses Spiels verlangt – „Aktualisieren“ baut es mit eingeschalteter Vorhersage; Spielstände und Daten bleiben.")
+                    : L("Installed with XR prediction on; this game's Test option is off now – “Update” builds it without; saved games and data are kept.",
+                        "Installiert mit eingeschalteter XR-Vorhersage; die Test-Option dieses Spiels ist jetzt aus – „Aktualisieren“ baut es ohne; Spielstände und Daten bleiben.")
             }
             if let built = game.status.builtWith, built.modified {
                 return L("Installed, built with toolchain \(Toolchain.name(version: built.toolchain, modified: true)). “Update” replaces this build with one from the newest toolchain, without the changes of the modified one (see “Toolchain” below); saved games and data are kept.",
@@ -983,6 +1005,43 @@ struct GameDetail: View {
                                 .disabled(model.syncBlocker(for: game) != nil)
                         }
                     }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(6)
+        }
+    }
+
+    /// Test: Optionen dieses Spiels, die ein Verhalten der Toolchain umstellen. Gelten ab dem nächsten Bau, in jedem
+    /// Bau (nicht nur in Testkopien); im Spiel bleiben sie unter Einstellungen › Erweitert › Test umstellbar.
+    private var testOptions: some View {
+        let chosen = model.options(for: game)
+        let wanted = chosen.xrPrediction == true
+        return GroupBox(L("Test", "Test")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: Binding(get: { wanted }, set: { on in
+                    var next = chosen
+                    next.xrPrediction = on ? true : nil
+                    model.setOptions(next, for: game)
+                })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("XR prediction", "XR-Vorhersage"))
+                        Text(L("Off, the game gets the head pose as it is when a frame starts, one per frame – on every path, OpenXR and Meta's own interface. On, as before: the head is predicted to the moment the picture is shown. Applies from the next install or update; in the game it stays switchable under Settings › Advanced › Test.",
+                               "Aus bekommt das Spiel die Kopfpose, wie sie zu Beginn eines Frames ist, eine pro Frame – auf jedem Weg, OpenXR und Metas eigene Schnittstelle. An wie bisher: Der Kopf wird auf den Moment vorhergesagt, in dem das Bild gezeigt wird. Gilt ab der nächsten Installation oder Aktualisierung; im Spiel bleibt es unter Einstellungen › Erweitert › Test umstellbar."))
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if model.xrPredictionSupported == false {
+                    Text(L("The installed toolchain cannot switch this yet: it always predicts. It takes effect with a newer one.",
+                           "Die installierte Toolchain kann das noch nicht umstellen: Sie sagt immer voraus. Es wirkt mit einer neueren."))
+                        .font(.callout).foregroundStyle(.orange)
+                } else if game.installed, let built = game.status.builtWith, built.xrPrediction != wanted {
+                    Text(wanted
+                         ? L("Installed without XR prediction – “Update” builds it with prediction on; saved games and data are kept.",
+                             "Installiert ohne XR-Vorhersage – „Aktualisieren“ baut es mit eingeschalteter Vorhersage; Spielstände und Daten bleiben.")
+                         : L("Installed with XR prediction on – “Update” builds it without; saved games and data are kept.",
+                             "Installiert mit eingeschalteter XR-Vorhersage – „Aktualisieren“ baut es ohne; Spielstände und Daten bleiben."))
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(6)

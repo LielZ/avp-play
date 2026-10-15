@@ -164,7 +164,8 @@ extension AppModel {
             out.append(Game(recipe: recipe,
                             status: GameStatus.of(recipe: recipe, store: paths.store, apps: installedApps, toolchainVersion: toolchainRevision,
                                                   pin: toolchainChoices.games[recipe.id], bundlePrefix: prefix,
-                                                  experimental: experimentalExpected),
+                                                  experimental: experimentalExpected, metalFX: metalFXExpected,
+                                                  xrPrediction: xrPredictionExpected(for: recipe.id)),
                             cover: nil, catalog: entry, draft: true))
         }
         allGames = out
@@ -244,10 +245,7 @@ extension AppModel {
                 let target = named ?? DraftRecipe.genericTarget(appId: entry.appId)
                 try MetaTool(url: tool).verify()
                 await say(L("Asking Meta's tool for the files of build \(build.version) …", "Metas Werkzeug wird nach den Dateien von Build \(build.version) gefragt …"))
-                var files = try MetaListing.list(.build, buildId: build.buildId, tool: tool, token: token)
-                try await Task.sleep(for: .seconds(5))
-                // Weitere Dateien hat nicht jedes Spiel; sagt das Werkzeug dazu nichts oder lehnt ab, bleibt es bei APK und OBB.
-                if let assets = try? MetaListing.list(.assets, buildId: build.buildId, tool: tool, token: token) { files += assets }
+                let files = try await MetaListing.files(buildId: build.buildId, tool: tool, token: token, client: meta, say: say)
                 let recipe = try DraftRecipe.make(game: detail, build: build, files: files, target: target, minCommit: toolchain?.commit() ?? "")
                 try FileManager.default.createDirectory(at: drafts, withIntermediateDirectories: true)
                 let encoder = JSONEncoder()

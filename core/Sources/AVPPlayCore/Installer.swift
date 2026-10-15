@@ -15,6 +15,8 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
     case notANativeApp(String)
     /// Das APK bringt nur Programmcode für einen anderen Prozessor mit (ein reines 32-Bit-Spiel).
     case wrongArchitecture(String, [String])
+    /// Die App ist eine 2D-App (ein Panel unter Horizon OS), kein VR-Spiel (`FlatApp`).
+    case notAVRGame
     /// Für ein Spiel aus Steam fehlt der Name des Steam-Kontos, mit dem Valves Werkzeug angemeldet ist.
     case steamAccountMissing
     /// Auf dem Gerät liegt dasselbe Spiel aus einer anderen Kaufquelle (Meta statt Steam oder umgekehrt).
@@ -49,6 +51,9 @@ public enum InstallError: Error, CustomStringConvertible, Equatable {
             let list = found.joined(separator: ", ")
             return L("\(title) cannot run on the Vision Pro. This build is a 32-bit game (it only contains code for \(list)); the Vision Pro's processor runs 64-bit code only, and this tool translates 64-bit Quest games. Nothing can be changed about that from here – only a 64-bit build from the developer would work. The files already downloaded can be removed on the game's page.",
                      "\(title) kann auf der Vision Pro nicht laufen. Dieser Build ist ein 32-Bit-Spiel (er enthält nur Code für \(list)); der Prozessor der Vision Pro führt ausschließlich 64-Bit-Code aus, und dieses Werkzeug übersetzt 64-Bit-Spiele der Quest. Daran lässt sich von hier aus nichts ändern – nur ein 64-Bit-Build des Entwicklers würde gehen. Die schon geladenen Dateien lassen sich auf der Seite des Spiels entfernen.")
+        case .notAVRGame:
+            return L("This is a 2D app, not a VR game. AVP Play only supports immersive games.",
+                     "Das ist eine 2D-App, kein VR-Spiel. AVP Play unterstützt nur immersive Spiele.")
         case .freeTeamFull(let title, let installed):
             let list = installed.joined(separator: ", ")
             return L("\(title) was not installed: a free Apple account may have only \(AppleMessages.freeAppsPerDevice) apps on the Vision Pro at a time, and these are already there: \(list). Remove one on the headset (press and hold its icon, then “Remove App”), then choose “Resume”. A paid developer membership has no such limit. Before you remove a game, let AVP Play fetch its saved games (the game's page, “Saved Games”): they stay on this Mac and are put back when you install the game again.",
@@ -102,6 +107,23 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     /// Die experimentellen Implementierungen (`Toolchain.experimentalSwitches`) in diesem Bau von Anfang an
     /// einschalten. Ohne Angabe: nein.
     public var experimental: Bool?
+    /// Der Name der App auf dem Gerät statt des üblichen (`KLEPTON_DISPLAY_OVERRIDE`). Ohne Angabe: der übliche.
+    public var displayName: String?
+    /// Ein Zusatz zum Namen der App, etwa „ (Test)“ (`KLEPTON_DISPLAY_SUFFIX`). Ohne Angabe: keiner.
+    public var displaySuffix: String?
+    /// Ob die Signatur dieser Installation als die der eigentlichen gilt (`SigningRecord.save(live:)`). Ohne Angabe:
+    /// ja, außer eine ausdrücklich genannte Kennung weicht von der der bisherigen eigentlichen Installation ab – oder,
+    /// gibt es noch keine, von der üblichen Kennung des Teams. Das ist eine Testkopie neben dem Spiel.
+    public var live: Bool?
+    /// Das MetalFX-Hochskalieren (`Toolchain.metalFXSwitch`) in diesem Bau von Anfang an einschalten. Ohne Angabe:
+    /// nein.
+    public var metalFX: Bool?
+    /// Die Auflösung in Prozent, mit der das Spiel beginnt, wenn `metalFX` eingeschaltet ist
+    /// (`MetalFXResolution`). Ohne Angabe: die des Targets.
+    public var resolution: Int?
+    /// Die XR-Vorhersage (`Toolchain.xrPredictionSwitch`) in diesem Bau von Anfang an einschalten – die Option
+    /// „XR prediction“ auf der Seite des Spiels. Ohne Angabe: nein, das Spiel bekommt die Kopfpose ohne Vorhersage.
+    public var xrPrediction: Bool?
     /// Initial launcher mode; an existing per-game headset preference always wins.
     public var controllerMode: ControllerMode?
 
@@ -172,6 +194,8 @@ public struct Installer: Sendable {
     let control = DeviceControl()
     let report: @Sendable (String) -> Void
     let progress: @Sendable (InstallProgress) -> Void
+    /// Metas Werkzeug, falls eingerichtet: der Ausweg für Dateien, die die direkte Adresse mit HTTP 404 verweigert.
+    public var metaTool: URL?
 
     public init(recipe: Recipe, request: InstallRequest, store: ContentStore,
                 progress: @escaping @Sendable (InstallProgress) -> Void = { _ in },
@@ -407,6 +431,10 @@ public struct Installer: Sendable {
                          "Es fehlt noch, und das stellst du selbst bereit, bevor das Spiel gebaut werden kann: \(open.joined(separator: ", ")). Auf der Seite des Spiels steht, woher es kommt."))
             }
         }
+        // Eine 2D-App, deren APK schon im Bestand liegt: nichts weiter laden.
+        if let apk = plan.first(where: { $0.file.role == "apk" && $0.action == .keep }) {
+            try FlatApp.refuse(apk: store.url(for: apk.file, in: recipe), recipe: recipe, store: store)
+        }
         let todo = plan.filter { $0.action != .keep && $0.action != .needsUser }
         let kept = plan.filter { $0.action == .keep }.count
         guard !todo.isEmpty else {
@@ -425,21 +453,28 @@ public struct Installer: Sendable {
                                     " \(elsewhere) davon liegen aus einer anderen Fassung dieses Spiels im Bestand; jede wird von dort übernommen, wenn sie unverändert ist.") : ""))
 
         var client = MetaClient(token: "unbenutzt")       // ohne Meta-Dateien wird er nie benutzt
+        var token: String?
         if todo.contains(where: { $0.file.source == nil }) {
-            client = MetaClient(token: try TokenStore().read(account: request.account))
+            token = try TokenStore().read(account: request.account)
+            client = MetaClient(token: token ?? "")
             let user = try await client.me()
             if let app = recipe.store.appId {
                 guard try await client.ownsApp(appId: app, userId: user) else { throw InstallError.notOwned(recipe.title) }
             }
         }
         var fetcher = Fetcher(client: client, store: store, gate: RequestGate(minInterval: .seconds(request.interval)))
+        if let token, let tool = metaTool, (try? MetaTool(url: tool).verify()) != nil {
+            fetcher.toolFallback = MetaToolDownload(tool: tool, token: token)
+        }
         // Sobald das APK da ist, steht fest, ob es überhaupt 64-Bit-Code enthält. Wenn nicht, wird nichts weiter
         // geladen – bei République VR wären das 3,4 GB für ein Spiel gewesen, das nie starten kann.
-        let title = recipe.title
+        // Ebenso, ob es eine 2D-App ist (Spotify, WhatsApp): die kann nie laufen.
+        let title = recipe.title, recipe = self.recipe, store = self.store
         fetcher.afterFile = { file, url in
             guard file.role == "apk" else { return }
             let found = ApkUnpacker.architectures(of: url)
             if ApkUnpacker.lacksArm64(found) { throw InstallError.wrongArchitecture(title, found.sorted()) }
+            try FlatApp.refuse(apk: url, recipe: recipe, store: store)
         }
         let summary = try await fetcher.run(plan, recipe: recipe) { report("  " + $0) }
         report(L("Downloaded: \(summary.downloaded) files, \(summary.kept) were already there"
@@ -467,6 +502,7 @@ public struct Installer: Sendable {
         if let apk = recipe.files.first(where: { $0.role == "apk" }) {
             let found = ApkUnpacker.architectures(of: store.url(for: apk, in: recipe))
             if ApkUnpacker.lacksArm64(found) { throw InstallError.wrongArchitecture(recipe.title, found.sorted()) }
+            try FlatApp.refuse(apk: store.url(for: apk, in: recipe), recipe: recipe, store: store)
         }
         try await prepare(toolchain)
         // Ein Versuch mit einer App, die gar kein natives Programm ist, würde gebaut, installiert und als fertig
@@ -498,19 +534,55 @@ public struct Installer: Sendable {
         let experimental = request.experimental == true
         if experimental {
             report(toolchain.supportsExperimental
-                   ? L("Experimental: the new pose and audio implementations are on from the start in this build (they can be switched off in the game under Settings › Advanced › Test).",
-                       "Experimentell: Die neue Pose- und Audio-Implementierung sind in diesem Bau von Anfang an eingeschaltet (im Spiel abschaltbar unter Einstellungen › Erweitert › Test).")
-                   : L("Experimental: this toolchain cannot switch the new pose and audio implementations on yet; the game is built as usual.",
-                       "Experimentell: Diese Toolchain kann die neue Pose- und Audio-Implementierung noch nicht einschalten; das Spiel wird wie üblich gebaut."))
+                   ? L("Experimental: the new audio implementation is on from the start in this build (it can be switched off in the game under Settings › Advanced › Test); with toolchain 507 also the one-head-pose-per-frame implementation, which newer toolchains use by default.",
+                       "Experimentell: Die neue Audio-Implementierung ist in diesem Bau von Anfang an eingeschaltet (im Spiel abschaltbar unter Einstellungen › Erweitert › Test); mit Toolchain 507 auch die Implementierung mit einer Kopfpose pro Frame, die neuere Toolchains ohnehin benutzen.")
+                   : L("Experimental: this toolchain cannot switch the new audio implementation on yet; the game is built as usual.",
+                       "Experimentell: Diese Toolchain kann die neue Audio-Implementierung noch nicht einschalten; das Spiel wird wie üblich gebaut."))
+        }
+        let metalFX = request.metalFX == true
+        if metalFX {
+            report(toolchain.supportsMetalFX
+                   ? L("MetalFX: upscaling is on from the start in this build. It sharpens the picture where the game's resolution is set below 100%, in every engine and path (Vulkan and GL, Meta's interface and OpenXR, with foveated rendering too); the metrics panel in the headset shows the resolution before and after it. In the game it can be switched off under Settings › Rendering.",
+                       "MetalFX: Das Hochskalieren ist in diesem Bau von Anfang an eingeschaltet. Es schärft das Bild, wo die Auflösung des Spiels unter 100 % steht, in jeder Engine und auf jedem Pfad (Vulkan und GL, Metas Schnittstelle und OpenXR, auch mit Foveated Rendering); das Leistungs-Panel in der Brille zeigt die Auflösung davor und danach. Im Spiel abschaltbar unter Einstellungen › Rendering.")
+                   : L("MetalFX: this toolchain cannot switch upscaling on from the start yet; the game is built as usual.",
+                       "MetalFX: Diese Toolchain kann das Hochskalieren noch nicht von Anfang an einschalten; das Spiel wird wie üblich gebaut."))
+            if toolchain.supportsMetalFX, let percent = request.resolution,
+               MetalFXResolution.environmentValue(percent) != nil {
+                let value = MetalFXResolution.clamped(percent)
+                report(toolchain.supportsRenderScalePreset
+                       ? L("MetalFX: the game starts at \(value)% resolution; what is set in the game (Settings › Rendering) counts from then on.",
+                           "MetalFX: Das Spiel beginnt mit \(value) % Auflösung; was im Spiel eingestellt wird (Einstellungen › Rendering), gilt danach.")
+                       : L("MetalFX: this toolchain cannot preset the resolution yet; the game starts at its usual one.",
+                           "MetalFX: Diese Toolchain kann die Auflösung noch nicht vorbelegen; das Spiel beginnt mit seiner üblichen."))
+            }
+        }
+        // Die XR-Vorhersage: aus, außer die Seite des Spiels schaltet sie ein. Eine ältere Toolchain sagt immer voraus.
+        let xrPrediction = request.xrPrediction == true
+        if !toolchain.supportsXRPrediction {
+            if xrPrediction {
+                report(L("XR prediction: this toolchain always predicts the head pose; the game is built as usual.",
+                         "XR-Vorhersage: Diese Toolchain sagt die Kopfpose immer voraus; das Spiel wird wie üblich gebaut."))
+            }
+        } else if xrPrediction {
+            report(L("XR prediction: on from the start in this build (in the game under Settings › Advanced › Test).",
+                     "XR-Vorhersage: In diesem Bau von Anfang an eingeschaltet (im Spiel unter Einstellungen › Erweitert › Test)."))
         }
         try toolchain.buildAndInstall(recipe: recipe, team: team, device: device, bundleId: bundle, log: log,
                                       extraEnvironment: TreeStore(store: store).toolchainEnvironment(recipe: recipe),
-                                      experimental: experimental, controllerMode: request.controllerMode ?? (request.resign == true ? toolchain.builtControllerMode(recipe: recipe) : .standard))
+                                      experimental: experimental, metalFX: metalFX,
+                                      resolution: metalFX ? request.resolution : nil,
+                                      xrPrediction: xrPrediction,
+                                      displayName: request.displayName, displaySuffix: request.displaySuffix,
+                                      controllerMode: request.controllerMode ?? (request.resign == true ? toolchain.builtControllerMode(recipe: recipe) : .standard))
         report(String(format: L("Built and installed (%.0f s).", "Gebaut und installiert (%.0f s)."), Date().timeIntervalSince(started)))
         // Womit signiert wurde und bis wann: Daran erinnert die App rechtzeitig vor dem Ablauf.
-        let record = SigningRecord(team: team, free: free, installed: Date(), expires: toolchain.signingExpiry(recipe: recipe),
+        var record = SigningRecord(team: team, free: free, installed: Date(), expires: toolchain.signingExpiry(recipe: recipe),
                                    bundleId: bundle)
-        record.save(store: store, recipe: recipe)
+        record.displayName = request.displayName
+        record.displaySuffix = request.displaySuffix
+        // Ohne ausdrückliche Kennung ist es immer die eigentliche Installation; mit einer entscheidet `save`
+        // (`SigningRecord.isLive`): Eine Testkopie wird es auch dann nicht, wenn das Spiel noch keinen Eintrag hat.
+        record.save(store: store, recipe: recipe, live: request.live ?? (request.bundleId == nil ? true : nil))
         if free {
             let until = record.expires.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short) }
             report(until.map { L("Signed with a free Apple team: the game opens until \($0). Install it again before then to renew it; its data stays.",
@@ -994,6 +1066,12 @@ public struct Installer: Sendable {
     }
 
     public static func gigabytes(_ bytes: Int64) -> String { String(format: "%.2f GB", Double(bytes) / 1e9) }
+    /// Für den Verlauf eines Auftrags: eine Stelle nach dem Komma unter 100 MB, darüber ganze MB.
+    public static func megabytes(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1e6
+        if bytes > 0, mb < 0.1 { return "< 0.1 MB" }
+        return String(format: mb < 100 ? "%.1f MB" : "%.0f MB", mb)
+    }
 }
 
 /// Ein Schalter, den ein Thread setzt und ein anderer liest.

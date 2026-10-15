@@ -56,9 +56,9 @@ public struct Toolchain: Sendable {
     }
 
     /// Die Beschreibung eines installierten Pakets; `nil` bei einem Arbeitsverzeichnis des Forks.
+    /// Gelesen wird die Datei nur, wenn sie sich seit dem letzten Mal geändert hat (siehe `ManifestCache`).
     public var manifest: ToolchainManifest? {
-        guard let data = try? Data(contentsOf: root.appendingPathComponent("toolchain.json")) else { return nil }
-        return try? ToolchainPackager.decoder.decode(ToolchainManifest.self, from: data)
+        ManifestCache.shared.manifest(at: root.appendingPathComponent("toolchain.json"))
     }
 
     /// Eine bearbeitete Arbeitskopie (siehe `ToolchainManifest.modified`)?
@@ -240,6 +240,9 @@ public struct Toolchain: Sendable {
 
     /// Die Test-Schalter der Toolchain, die die experimentelle Einstellung des Programms in jedem Spiel von Anfang
     /// an einschaltet: die neue Kopfposen- und die neue Audio-Implementierung. Im Spiel bleiben sie abschaltbar.
+    /// `KL_OVRP_ONE_POSE` wirkt nur noch bei älteren Toolchains (507): Ab Klepton #9 ist es der Standard und kein
+    /// eigener Test-Schalter mehr, die Angabe ist dort ohne Wirkung. Bleibt in der Liste, damit ein Bau mit 507
+    /// weiter tut, was die Einstellung bisher tat.
     public static let experimentalSwitches = ["KL_OVRP_ONE_POSE", "KL_AUDIO_SINK2"]
 
     /// Both controller sources and the generated launch-default option must be present.
@@ -279,6 +282,51 @@ public struct Toolchain: Sendable {
         return text.contains("KLEPTON_TEST_ON")
     }
 
+    /// Der Name, unter dem eine Installation das MetalFX-Hochskalieren des Compositors von Anfang an einschaltet –
+    /// in derselben Liste wie die Test-Schalter (`KLEPTON_TEST_ON`, im Spiel `KLTestOn`). Der Schalter im Spiel
+    /// (Einstellungen › Rendering › „MetalFX upscaling“, `klepton.metalfxUpscale`) bleibt davon unberührt: Was dort
+    /// gewählt ist, gilt.
+    public static let metalFXSwitch = "KL_METALFX_UPSCALE"
+
+    /// Ob diese Toolchain das MetalFX-Hochskalieren hat und eine Installation es von Anfang an einschalten kann.
+    /// Beides wird in ihren Quellen nachgesehen: der Schalter im Spiel (Klepton PR #2) und der Name, mit dem eine
+    /// Installation ihn vorbelegt. Fehlt eins, baut sie wie immer und der Bau trägt den Vermerk nicht.
+    public var supportsMetalFX: Bool {
+        guard supportsExperimental else { return false }
+        let sources = root.appendingPathComponent("visionos/Sources")
+        let texts = ["KleptonTuning.swift", "KleptonCompositor.swift"].compactMap {
+            try? String(contentsOf: sources.appendingPathComponent($0), encoding: .utf8)
+        }.joined(separator: "\n")
+        return texts.contains("klepton.metalfxUpscale") && texts.contains(Toolchain.metalFXSwitch)
+    }
+
+    /// Der Name, unter dem eine Installation die XR-Vorhersage von Anfang an einschaltet – in derselben Liste wie die
+    /// Test-Schalter (`KLEPTON_TEST_ON`, im Spiel `KLTestOn` und der Test-Schalter „XR prediction“). Ohne ist sie aus:
+    /// Die Toolchain gibt dann auf jedem Weg die Kopfpose ohne Vorhersage (OpenXR `KL_XR_PREDICT`, Metas Schnittstelle
+    /// `KL_OVRP_ONE_POSE`). Was im Spiel gewählt ist, gilt.
+    public static let xrPredictionSwitch = "KL_XR_PREDICT"
+
+    /// Ob diese Toolchain die XR-Vorhersage als Test-Schalter hat und sie ohne ihn auslässt. Eine ältere sagt immer
+    /// voraus, was die Option auch sagt; ihr Bau trägt den Vermerk dann nicht.
+    public var supportsXRPrediction: Bool {
+        guard supportsExperimental,
+              let text = try? String(contentsOf: root.appendingPathComponent("visionos/Sources/KleptonTuning.swift"), encoding: .utf8)
+        else { return false }
+        return text.contains("Entry(env: \"\(Toolchain.xrPredictionSwitch)\"")
+    }
+
+    /// Der Name, unter dem eine Installation die Auflösung vorgibt, mit der ein Spiel beginnt (ein Bruchteil wie
+    /// `0.75`; im Spiel `KLRenderScaleDefault`, sonst `render_scale` des Targets). Was der Spieler im Spiel einstellt,
+    /// gilt danach wie immer (`klepton.renderScale`).
+    public static let renderScaleVariable = "KLEPTON_RENDER_SCALE"
+
+    /// Ob eine Installation dieser Toolchain die Startauflösung vorgeben kann (`renderScaleVariable`). Ohne bleibt es
+    /// bei der des Targets.
+    public var supportsRenderScalePreset: Bool {
+        guard let text = try? String(contentsOf: root.appendingPathComponent("visionos/gen_xcodeproj.py"), encoding: .utf8) else { return false }
+        return text.contains(Toolchain.renderScaleVariable)
+    }
+
     /// Bis wann die zuletzt gebaute App dieses Targets signiert ist – aus dem Profil in ihrem Programmpaket.
     public func signingExpiry(recipe: Recipe) -> Date? {
         let products = root.appendingPathComponent("visionos/build/dd-device-\(recipe.toolchain.target)/Build/Products/Debug-xros")
@@ -293,8 +341,19 @@ public struct Toolchain: Sendable {
     /// die Spieldaten überträgt anschließend das ergänzende Kopieren.
     /// - Parameter experimental: die experimentellen Implementierungen von Anfang an einschalten. Wirkt nur, wo
     ///   die Toolchain das kann (`supportsExperimental`); der Stempel des Baus sagt, ob es geschehen ist.
+    /// - Parameter metalFX: das MetalFX-Hochskalieren im Spiel von Anfang an einschalten. Wirkt nur, wo die
+    ///   Toolchain das kann (`supportsMetalFX`); auch das sagt der Stempel.
+    /// - Parameter resolution: die Auflösung in Prozent, mit der das Spiel beginnt. Wirkt nur zusammen mit `metalFX`
+    ///   und wo die Toolchain sie vorgeben kann (`supportsRenderScalePreset`); ohne bleibt es bei der des Targets.
+    /// - Parameter xrPrediction: die XR-Vorhersage im Spiel von Anfang an einschalten. Wirkt nur, wo die Toolchain
+    ///   das kann (`supportsXRPrediction`); auch das sagt der Stempel.
+    /// - Parameters displayName, displaySuffix: der Name der App auf dem Gerät statt des üblichen bzw. ein Zusatz
+    ///   dazu (`displayEnvironment`); ohne Angabe bleibt er, wie er war.
     public func buildAndInstall(recipe: Recipe, team: String, device: Device, bundleId: String?, log: URL,
-                                extraEnvironment: [String: String] = [:], experimental: Bool = false, controllerMode: ControllerMode = .standard) throws {
+                                extraEnvironment: [String: String] = [:], experimental: Bool = false,
+                                metalFX: Bool = false, resolution: Int? = nil, xrPrediction: Bool = false,
+                                displayName: String? = nil, displaySuffix: String? = nil,
+                                controllerMode: ControllerMode = .standard) throws {
         guard team.count == 10, team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
             throw RecipeError.invalid(L("team ID '\(team)' (expected: 10 characters)", "Team-ID '\(team)' (erwartet: 10 Zeichen)"))
         }
@@ -313,10 +372,19 @@ public struct Toolchain: Sendable {
         env["KLEPTON_START_SCREEN"] = "1"
         env["KLEPTON_APP_VERSION"] = AppStamp.short(versionName: recipe.versionName)
         let experimental = experimental && supportsExperimental
+        let metalFX = metalFX && supportsMetalFX
+        // Die Startauflösung gibt es nur mit MetalFX und einer Toolchain, die sie liest; der Stempel trägt, was gilt.
+        let resolution = metalFX && supportsRenderScalePreset && MetalFXResolution.environmentValue(resolution) != nil
+            ? resolution.map(MetalFXResolution.clamped) : nil
+        let xrPrediction = xrPrediction && supportsXRPrediction
         env["KLEPTON_APP_BUILD"] = AppStamp.build(versionCode: recipe.versionCode, toolchainVersion: version(), modified: isModified,
-                                                  experimental: experimental)
+                                                  experimental: experimental, metalFX: metalFX, resolution: resolution,
+                                                  xrPrediction: xrPrediction)
         // Nie aus der Umgebung dieses Programms übernehmen: Was eingeschaltet ist, sagt allein der Auftrag.
-        env["KLEPTON_TEST_ON"] = experimental ? Toolchain.experimentalSwitches.joined(separator: ",") : nil
+        let switchesOn = (experimental ? Toolchain.experimentalSwitches : []) + (metalFX ? [Toolchain.metalFXSwitch] : [])
+            + (xrPrediction ? [Toolchain.xrPredictionSwitch] : [])
+        env["KLEPTON_TEST_ON"] = switchesOn.isEmpty ? nil : switchesOn.joined(separator: ",")
+        env[Toolchain.renderScaleVariable] = MetalFXResolution.environmentValue(resolution)
         if let bundleId { env["KLEPTON_BUNDLE_ID"] = bundleId }
         // Ein kostenloses Team bekommt von Apple „Increased Memory Limit“, aber weder „Extended Virtual
         // Addressing“ noch „Low-Latency Streaming“. Mit einer der beiden im Auftrag scheitert die ganze Signatur.
@@ -329,6 +397,7 @@ public struct Toolchain: Sendable {
             env["KLEPTON_LOW_LATENCY"] = "0"
         }
         env.merge(Toolchain.genericEnvironment(recipe: recipe)) { _, new in new }
+        env.merge(Toolchain.displayEnvironment(name: displayName, suffix: displaySuffix)) { _, new in new }
         env.merge(extraEnvironment) { _, new in new }
         env.merge(controllerEnvironment) { _, new in new }
 
@@ -513,5 +582,93 @@ public struct Toolchain: Sendable {
         guard (try? p.run()) != nil else { return -1 }
         p.waitUntilExit()
         return p.terminationStatus
+    }
+}
+
+/// Die gelesenen `toolchain.json` aller Toolchains dieses Prozesses. Die Oberfläche fragt bei jedem Neuzeichnen
+/// nach Nummer und Commit; gelesen und dekodiert wird nur, wenn sich die Datei geändert hat (Änderungszeit,
+/// Größe oder Inode) oder sie neu ist. Fehlt sie, gibt es nichts zu merken.
+final class ManifestCache: @unchecked Sendable {
+    static let shared = ManifestCache()
+
+    private struct Stamp: Equatable {
+        var seconds: Int, nanoseconds: Int, size: Int64, inode: UInt64
+    }
+    private var entries: [String: (stamp: Stamp, manifest: ToolchainManifest?)] = [:]
+    private let lock = NSLock()
+
+    func manifest(at url: URL) -> ToolchainManifest? {
+        let path = url.path
+        var info = stat()
+        guard stat(path, &info) == 0 else {
+            lock.withLock { _ = entries.removeValue(forKey: path) }
+            return nil
+        }
+        let stamp = Stamp(seconds: Int(info.st_mtimespec.tv_sec), nanoseconds: Int(info.st_mtimespec.tv_nsec),
+                          size: Int64(info.st_size), inode: UInt64(info.st_ino))
+        if let known = lock.withLock({ entries[path] }), known.stamp == stamp { return known.manifest }
+        let manifest = (try? Data(contentsOf: url)).flatMap { try? ToolchainPackager.decoder.decode(ToolchainManifest.self, from: $0) }
+        lock.withLock { entries[path] = (stamp, manifest) }
+        return manifest
+    }
+}
+
+/// Die Auflösung, mit der ein Spiel beginnt, wenn das MetalFX-Hochskalieren von Anfang an eingeschaltet ist. Bei 100 %
+/// hat das Hochskalieren nichts zu tun; darum belegt das Einschalten die Auflösung mit 75 % vor. Ändert der Spieler sie
+/// danach, gilt sein Wert; das Ausschalten stellt den Wert von vor dem Einschalten wieder her, ohne einen 100 %.
+public enum MetalFXResolution {
+    /// Was das Einschalten vorbelegt.
+    public static let preset = 75
+    /// Ohne Vorgabe: die volle Auflösung.
+    public static let full = 100
+    /// Was sich einstellen lässt, in Schritten von 5 – so weit, wie es auch der Regler im Spiel zulässt.
+    public static let range = 50...100
+
+    /// Der Stand der Einstellung: die Auflösung und der Wert von vor dem Einschalten, falls es einen gab.
+    public struct State: Equatable, Sendable {
+        public var resolution: Int
+        public var before: Int?
+        public init(resolution: Int, before: Int? = nil) { self.resolution = resolution; self.before = before }
+    }
+
+    /// Was nach dem Umlegen des MetalFX-Schalters gilt. Ein: vorbelegen und den bisherigen Wert merken. Aus: den
+    /// gemerkten zurück, ohne einen 100 %. Ein Schalten auf den Stand, der schon gilt, ändert nichts – sonst ginge
+    /// der eigene Wert des Spielers verloren.
+    public static func switched(metalFX on: Bool, was: Bool, state: State) -> State {
+        guard on != was else { return state }
+        return on ? State(resolution: preset, before: clamped(state.resolution))
+                  : State(resolution: state.before.map(clamped) ?? full)
+    }
+
+    /// Ein Wert in `range`, auf 5 gerundet.
+    public static func clamped(_ percent: Int) -> Int {
+        min(max(Int((Double(percent) / 5).rounded()) * 5, range.lowerBound), range.upperBound)
+    }
+
+    /// Was `--resolution` auf der Kommandozeile ergibt, und eine Warnung, wenn der Wert so nicht gilt: ohne
+    /// `--metalfx` wird er nicht gebraucht, sonst ohne Angabe die Vorbelegung, und außerhalb des Bereichs oder
+    /// zwischen den Schritten der nächste gültige.
+    public static func commandLine(metalFX: Bool, value: String?) -> (resolution: Int?, warning: String?) {
+        guard metalFX else {
+            return (nil, value.map { _ in L("--resolution only applies together with --metalfx; it is ignored.",
+                                              "--resolution gilt nur zusammen mit --metalfx; es wird nicht beachtet.") })
+        }
+        guard let value else { return (preset, nil) }
+        guard let percent = Int(value.trimmingCharacters(in: .whitespaces)) else {
+            return (preset, L("--resolution \(value): not a whole number of percent; \(preset)% is used.",
+                              "--resolution \(value): keine ganze Prozentzahl; es gilt \(preset) %."))
+        }
+        let used = clamped(percent)
+        guard used != percent else { return (used, nil) }
+        return (used, L("--resolution \(percent): possible are \(range.lowerBound) to \(range.upperBound)% in steps of 5; \(used)% is used.",
+                        "--resolution \(percent): möglich sind \(range.lowerBound) bis \(range.upperBound) % in Schritten von 5; es gilt \(used) %."))
+    }
+
+    /// Was die Toolchain unter `Toolchain.renderScaleVariable` bekommt: der Bruchteil, oder nichts bei 100 % (dann
+    /// bleibt es bei der Auflösung des Targets) und ohne Angabe.
+    public static func environmentValue(_ percent: Int?) -> String? {
+        guard let percent else { return nil }
+        let value = clamped(percent)
+        return value < full ? String(format: "%.2f", Double(value) / 100) : nil
     }
 }
