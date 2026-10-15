@@ -28,6 +28,11 @@ struct Options {
     func value(_ name: String) -> String? { values[name]?.last }
 }
 
+/// Ein Hinweis auf stderr, ohne abzubrechen.
+func warn(_ message: String) {
+    FileHandle.standardError.write(Data((L("Warning: ", "Warnung: ") + Redaction.redact(message) + "\n").utf8))
+}
+
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((Redaction.redact(message) + "\n").utf8))
     exit(1)
@@ -141,6 +146,9 @@ avpplay – command line for the AVP Play core library
              --replace-running       install even if the game is running (it will be quit)
              --experimental          build with the toolchain's new pose and audio implementations switched on from the start
                                      (they can be turned off in the game; the app's setting “Experimental” does the same)
+             --metalfx               build with the compositor's MetalFX upscaling switched on from the start (sharpens the picture
+                                     when the game's resolution is below 100%; off in the game under Settings › Rendering)
+             --resolution <percent>  with --metalfx: the resolution the game starts at (default 75; 100: the game's own)
              --addons-only           job start: only sync purchased add-on content of an installed game (no build, no --team)
              --download-only         job start: only download the files (needs no Xcode, toolchain, --team or device)
              --build-only            job start: check, download, build and install the app, but do not copy the game data yet
@@ -208,6 +216,9 @@ avpplay – Kommandozeile zur Kern-Bibliothek von AVP Play
              --restore-saves         nach dem Kopieren die Spielstände vom Mac zurückspielen, wenn das Spiel auf dem Gerät noch keine hat
              --experimental          mit von Anfang an eingeschalteter neuer Pose- und Audio-Implementierung der Toolchain bauen
                                      (im Spiel abschaltbar; die Einstellung „Experimentell“ des Programms tut dasselbe)
+             --metalfx               mit von Anfang an eingeschaltetem MetalFX-Hochskalieren des Compositors bauen (schärft das Bild,
+                                     wenn die Auflösung des Spiels unter 100 % steht; im Spiel abschaltbar unter Einstellungen › Rendering)
+             --resolution <Prozent>  mit --metalfx: die Auflösung, mit der das Spiel beginnt (Vorgabe 75; 100: die des Spiels)
              --addons-only           job start: nur gekaufte Zusatzinhalte eines installierten Spiels abgleichen (kein Bau, kein --team)
              --download-only         job start: nur die Dateien laden (braucht weder Xcode noch Toolchain, --team oder Gerät)
              --build-only            job start: prüfen, laden, bauen und die App installieren, aber die Spieldaten noch nicht kopieren
@@ -223,7 +234,7 @@ Allgemein: --account <Name>    Eintrag im Schlüsselbund (Standard: default)
 }
 
 let valued: Set<String> = ["account", "steam-account", "source", "store", "recipes", "locale", "with", "only", "interval", "from", "to", "force", "name",
-                           "team", "device", "bundle-id", "display-name", "display-suffix", "toolchain", "icon", "tool", "jobs", "toolchains", "saves"]
+                           "team", "device", "bundle-id", "display-name", "display-suffix", "toolchain", "icon", "tool", "jobs", "toolchains", "saves", "resolution"]
 let o = Options(Array(CommandLine.arguments.dropFirst()), valued: valued)
 guard let command = o.positional.first else { print(usage()); exit(0) }
 OtherSources.use(recipes: recipesDirectory(o))
@@ -310,6 +321,10 @@ func installRequest(_ o: Options, recipe id: String? = nil) -> InstallRequest {
     if o.flags.contains("replace-running") { request.replaceRunning = true }
     if o.flags.contains("restore-saves") { request.restoreSaves = true }
     if o.flags.contains("experimental") { request.experimental = true }
+    if o.flags.contains("metalfx") { request.metalFX = true }
+    let resolution = MetalFXResolution.commandLine(metalFX: request.metalFX == true, value: o.value("resolution"))
+    request.resolution = resolution.resolution
+    if let warning = resolution.warning { warn(warning) }
     request.interval = Double(o.value("interval") ?? "") ?? 0
     return request
 }

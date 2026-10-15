@@ -110,6 +110,12 @@ public struct InstallRequest: Codable, Sendable, Equatable {
     /// ja, außer eine ausdrücklich genannte Kennung weicht von der der bisherigen eigentlichen Installation ab – oder,
     /// gibt es noch keine, von der üblichen Kennung des Teams. Das ist eine Testkopie neben dem Spiel.
     public var live: Bool?
+    /// Das MetalFX-Hochskalieren (`Toolchain.metalFXSwitch`) in diesem Bau von Anfang an einschalten. Ohne Angabe:
+    /// nein.
+    public var metalFX: Bool?
+    /// Die Auflösung in Prozent, mit der das Spiel beginnt, wenn `metalFX` eingeschaltet ist
+    /// (`MetalFXResolution`). Ohne Angabe: die des Targets.
+    public var resolution: Int?
 
     public init(toolchain: String) { self.toolchain = toolchain }
 }
@@ -513,9 +519,28 @@ public struct Installer: Sendable {
                    : L("Experimental: this toolchain cannot switch the new pose and audio implementations on yet; the game is built as usual.",
                        "Experimentell: Diese Toolchain kann die neue Pose- und Audio-Implementierung noch nicht einschalten; das Spiel wird wie üblich gebaut."))
         }
+        let metalFX = request.metalFX == true
+        if metalFX {
+            report(toolchain.supportsMetalFX
+                   ? L("MetalFX: upscaling is on from the start in this build. It sharpens the picture where the game's resolution is set below 100%, in every engine and path (Vulkan and GL, Meta's interface and OpenXR, with foveated rendering too); the metrics panel in the headset shows the resolution before and after it. In the game it can be switched off under Settings › Rendering.",
+                       "MetalFX: Das Hochskalieren ist in diesem Bau von Anfang an eingeschaltet. Es schärft das Bild, wo die Auflösung des Spiels unter 100 % steht, in jeder Engine und auf jedem Pfad (Vulkan und GL, Metas Schnittstelle und OpenXR, auch mit Foveated Rendering); das Leistungs-Panel in der Brille zeigt die Auflösung davor und danach. Im Spiel abschaltbar unter Einstellungen › Rendering.")
+                   : L("MetalFX: this toolchain cannot switch upscaling on from the start yet; the game is built as usual.",
+                       "MetalFX: Diese Toolchain kann das Hochskalieren noch nicht von Anfang an einschalten; das Spiel wird wie üblich gebaut."))
+            if toolchain.supportsMetalFX, let percent = request.resolution,
+               MetalFXResolution.environmentValue(percent) != nil {
+                let value = MetalFXResolution.clamped(percent)
+                report(toolchain.supportsRenderScalePreset
+                       ? L("MetalFX: the game starts at \(value)% resolution; what is set in the game (Settings › Rendering) counts from then on.",
+                           "MetalFX: Das Spiel beginnt mit \(value) % Auflösung; was im Spiel eingestellt wird (Einstellungen › Rendering), gilt danach.")
+                       : L("MetalFX: this toolchain cannot preset the resolution yet; the game starts at its usual one.",
+                           "MetalFX: Diese Toolchain kann die Auflösung noch nicht vorbelegen; das Spiel beginnt mit seiner üblichen."))
+            }
+        }
         try toolchain.buildAndInstall(recipe: recipe, team: team, device: device, bundleId: bundle, log: log,
                                       extraEnvironment: TreeStore(store: store).toolchainEnvironment(recipe: recipe),
-                                      experimental: experimental, displayName: request.displayName, displaySuffix: request.displaySuffix)
+                                      experimental: experimental, metalFX: metalFX,
+                                      resolution: metalFX ? request.resolution : nil,
+                                      displayName: request.displayName, displaySuffix: request.displaySuffix)
         report(String(format: L("Built and installed (%.0f s).", "Gebaut und installiert (%.0f s)."), Date().timeIntervalSince(started)))
         // Womit signiert wurde und bis wann: Daran erinnert die App rechtzeitig vor dem Ablauf.
         var record = SigningRecord(team: team, free: free, installed: Date(), expires: toolchain.signingExpiry(recipe: recipe),

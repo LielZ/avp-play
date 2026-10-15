@@ -151,6 +151,30 @@ struct SettingsView: View {
                            "Die installierte Toolchain kann das noch nicht; es wirkt mit einer neueren."))
                         .font(.callout).foregroundStyle(.orange)
                 }
+                Toggle(L("MetalFX: switch on upscaling automatically when installing",
+                         "MetalFX: Hochskalieren bei Installation automatisch einschalten"),
+                       isOn: Binding(get: { model.metalFXUpscaling },
+                                     set: { model.setMetalFXUpscaling($0); model.refresh() }))
+                if model.metalFXUpscaling {
+                    LabeledContent(L("Resolution at the start", "Auflösung zu Beginn")) {
+                        HStack {
+                            Slider(value: Binding(get: { Double(model.metalFXResolution) },
+                                                  set: { model.metalFXResolution = MetalFXResolution.clamped(Int($0)) }),
+                                   in: Double(MetalFXResolution.range.lowerBound)...Double(MetalFXResolution.range.upperBound),
+                                   step: 5)
+                            Text("\(model.metalFXResolution) %").monospacedDigit().frame(width: 48, alignment: .trailing)
+                        }
+                    }
+                }
+                Text(L("When a game's resolution (its start window › Settings) is below 100%, the game draws a smaller picture and the Vision Pro stretches it to the size of the display. With this on, every game you install or update starts with Apple's MetalFX scaler doing that stretch instead of a plain linear one: the same pixels in, a sharper picture out, for a little graphics time. At 100% there is nothing to upscale, so switching this on sets the resolution a game starts at to 75% (the slider below; your own value counts once you change it, and switching off brings back the one from before, or 100%). What is chosen in a game itself counts there. It works in every game: Vulkan and GL, through Meta's own interface or OpenXR (Half-Life: Alyx, Steam Link, Doom 3, Walkabout, Beat Saber 1.45), with foveated rendering on, too; only where the picture cannot be scaled safely does the game keep the linear stretch. The metrics panel in the headset (Create + Options held for a second) shows the resolution the game renders at, whether MetalFX is upscaling and on which path, and the resolution after it. In a game it can still be switched off under Settings › Rendering › MetalFX upscaling. Games that are already installed then show “Update available”, as with the switch above.",
+                       "Steht die Auflösung eines Spiels (Startfenster › Einstellungen) unter 100 %, zeichnet das Spiel ein kleineres Bild, und die Vision Pro streckt es auf die Größe des Displays. Hiermit beginnt jedes Spiel, das du installierst oder aktualisierst, damit, dass Apples MetalFX-Scaler das übernimmt statt einer einfachen linearen Streckung: dieselben Bildpunkte hinein, ein schärferes Bild heraus, für etwas Grafikzeit. Bei 100 % gibt es nichts hochzuskalieren; darum belegt das Einschalten die Auflösung, mit der ein Spiel beginnt, mit 75 % vor (der Regler darunter; ein eigener Wert gilt, sobald du ihn änderst, und das Ausschalten stellt den von davor wieder her, sonst 100 %). Was in einem Spiel selbst gewählt ist, gilt dort. Es wirkt in jedem Spiel: Vulkan und GL, über Metas eigene Schnittstelle oder über OpenXR (Half-Life: Alyx, Steam Link, Doom 3, Walkabout, Beat Saber 1.45), auch mit eingeschaltetem Foveated Rendering; nur wo sich das Bild nicht sicher skalieren lässt, bleibt es bei der linearen Streckung. Das Leistungs-Panel in der Brille (Create + Options eine Sekunde halten) zeigt die Auflösung, in der das Spiel rendert, ob und auf welchem Pfad MetalFX hochskaliert, und die Auflösung danach. Im Spiel lässt es sich unter Einstellungen › Rendering › MetalFX upscaling weiterhin ausschalten. Schon installierte Spiele zeigen dann „Aktualisierung möglich“, wie beim Schalter darüber."))
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.toolchain != nil, model.metalFXExpected == nil {
+                    Text(L("The installed toolchain cannot do this yet (it needs the compositor's MetalFX upscaling and a way for an installation to switch it on); it takes effect with a newer one.",
+                           "Die installierte Toolchain kann das noch nicht (sie braucht das MetalFX-Hochskalieren im Compositor und einen Weg, es bei der Installation einzuschalten); es wirkt mit einer neueren."))
+                        .font(.callout).foregroundStyle(.orange)
+                }
             }
 
             Section(L("Advanced", "Erweitert")) {
