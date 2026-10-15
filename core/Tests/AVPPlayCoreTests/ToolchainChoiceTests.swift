@@ -420,6 +420,103 @@ final class ToolchainChoiceTests: XCTestCase {
         XCTAssertNil(renewed("7.4.2").resolution)
     }
 
+    // MARK: Die XR-Vorhersage (Test-Option je Spiel)
+
+    func testTheStampCarriesTheXRPrediction() {
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, xrPrediction: true), "7.4.128")
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, modified: true, experimental: true, metalFX: true,
+                                      resolution: 50, xrPrediction: true), "7.4.215")
+        // Ohne die Option bleibt der Stempel, wie er war.
+        XCTAssertEqual(AppStamp.build(versionCode: 7, toolchainVersion: 4, metalFX: true, resolution: 75), "7.4.44")
+        XCTAssertEqual(AppStamp.parse("7.4.128"),
+                       .init(versionCode: 7, toolchain: 4, modified: false, xrPrediction: true))
+        XCTAssertEqual(AppStamp.parse("7.4.215"),
+                       .init(versionCode: 7, toolchain: 4, modified: true, experimental: true, metalFX: true, resolution: 50,
+                             xrPrediction: true))
+        XCTAssertEqual(AppStamp.parse("7.4.44")?.xrPrediction, false)
+        // Eine Stufe ohne MetalFX bleibt ungültig, auch mit dem Bit der Vorhersage; darüber stammt nichts von hier.
+        XCTAssertEqual(AppStamp.parse("7.4.168"), .init(versionCode: 7, toolchain: 4, modified: false))
+        XCTAssertEqual(AppStamp.parse("7.4.256"), .init(versionCode: 7, toolchain: 4, modified: false))
+        for percent in stride(from: 50, through: 100, by: 5) {
+            let stamp = AppStamp.build(versionCode: 1, toolchainVersion: 2, metalFX: true, resolution: percent, xrPrediction: true)
+            XCTAssertEqual(AppStamp.parse(stamp)?.xrPrediction, true, stamp)
+            XCTAssertEqual(AppStamp.parse(stamp)?.resolution, percent == 100 ? nil : percent, stamp)
+        }
+    }
+
+    func testABuildThatDiffersFromTheGamesXRPredictionOptionCanBeUpdated() {
+        let store = ContentStore(root: temp())
+        let bundle = Toolchain.bundleId(target: "moss", prefix: "com.example")
+        func status(_ installed: String, metalFX: Bool? = nil, xrPrediction: Bool?,
+                    pin: ToolchainChoices.Pin? = nil) -> GameStatus.OnDevice {
+            GameStatus.of(recipe: recipe(), store: store,
+                          apps: [InstalledApp(bundleIdentifier: bundle, name: "Moss", version: "1.0", bundleVersion: installed)],
+                          toolchainVersion: 4, pin: pin, bundlePrefix: "com.example", metalFX: metalFX,
+                          xrPrediction: xrPrediction).onDevice
+        }
+        XCTAssertEqual(status("7.4", xrPrediction: true), .olderToolchain(stamp: "1.0 (7.4)"))
+        XCTAssertEqual(status("7.4.128", xrPrediction: true), .current(stamp: "1.0 (7.4.128)"))
+        XCTAssertEqual(status("7.4.128", xrPrediction: false), .olderToolchain(stamp: "1.0 (7.4.128)"))
+        XCTAssertEqual(status("7.4", xrPrediction: false), .current(stamp: "1.0 (7.4)"))
+        // Zusammen mit MetalFX: jede für sich verglichen.
+        XCTAssertEqual(status("7.4.172", metalFX: true, xrPrediction: true), .current(stamp: "1.0 (7.4.172)"))
+        XCTAssertEqual(status("7.4.44", metalFX: true, xrPrediction: true), .olderToolchain(stamp: "1.0 (7.4.44)"))
+        // Keine Toolchain, die es kann, oder eine für das Spiel gewählte: kein Vergleich.
+        XCTAssertEqual(status("7.4.128", xrPrediction: nil), .current(stamp: "1.0 (7.4.128)"))
+        XCTAssertEqual(status("7.4", xrPrediction: true, pin: .init(version: 4, commit: "abc")),
+                       .current(stamp: "1.0 (7.4)"))
+    }
+
+    func testRenewalKeepsTheXRPrediction() {
+        func renewed(_ stamp: String) -> InstallRequest {
+            var request = InstallRequest(toolchain: "/tmp/t")
+            Renewal.keepBuild(AppStamp.parse(stamp), in: &request)
+            return request
+        }
+        XCTAssertEqual(renewed("7.4.128").xrPrediction, true)
+        XCTAssertEqual(renewed("7.4.172").xrPrediction, true)
+        XCTAssertEqual(renewed("7.4.172").resolution, 75)
+        XCTAssertNil(renewed("7.4.44").xrPrediction)
+        XCTAssertNil(renewed("7.4").xrPrediction)
+    }
+
+    func testOnlyAToolchainWithTheTestSwitchSupportsXRPrediction() throws {
+        let dir = temp()
+        let toolchain = try plant(manifest(4), at: dir)
+        let sources = dir.appendingPathComponent("visionos/Sources")
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        try "KLEPTON_TEST_ON".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsXRPrediction)
+        // Toolchain 507: KL_XR_PREDICT nur als Variable der Laufzeit, kein Test-Schalter – sie sagt immer voraus.
+        try "kl_openxr_set_predict(kl_openxr_predict() != 0 ? 0 : 1) // KL_XR_PREDICT"
+            .write(to: sources.appendingPathComponent("KleptonTuning.swift"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsXRPrediction)
+        try "Entry(env: \"\(Toolchain.xrPredictionSwitch)\", value: \"1\","
+            .write(to: sources.appendingPathComponent("KleptonTuning.swift"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(toolchain.supportsXRPrediction)
+        // Ohne KLEPTON_TEST_ON kommt der Name nicht ins Spiel.
+        try "".write(to: dir.appendingPathComponent("visionos/gen_xcodeproj.py"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(toolchain.supportsXRPrediction)
+    }
+
+    func testAnInstallRequestWithoutTheFieldHasNoXRPrediction() throws {
+        var request = InstallRequest(toolchain: "/tmp/t")
+        let old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        XCTAssertNil(old?["xrPrediction"])
+        XCTAssertNil(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).xrPrediction)
+        request.xrPrediction = true
+        XCTAssertEqual(try JSONDecoder().decode(InstallRequest.self, from: JSONEncoder().encode(request)).xrPrediction, true)
+    }
+
+    /// Gegen einen echten Klepton-Stand mit der XR-Vorhersage als Test-Schalter: `AVPPLAY_KLEPTON_CHECKOUT=<Klon>` –
+    /// sonst übersprungen.
+    func testAKleptonCheckoutWithTheXRPredictionSwitchIsRecognised() throws {
+        guard let path = ProcessInfo.processInfo.environment["AVPPLAY_KLEPTON_CHECKOUT"] else {
+            throw XCTSkip("AVPPLAY_KLEPTON_CHECKOUT not set")
+        }
+        XCTAssertTrue(try Toolchain(root: URL(fileURLWithPath: path)).supportsXRPrediction)
+    }
+
     // MARK: Was zur Wahl steht
 
     func testOptionsOfferOnlyWhatCanBuildTheRecipe() throws {

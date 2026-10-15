@@ -24,6 +24,9 @@ enum Probe {
         var experimentalExpected: Bool?
         /// Dasselbe für das MetalFX-Hochskalieren (`AppModel.metalFXExpected`).
         var metalFXExpected: Bool?
+        /// Ob die neueste Toolchain die XR-Vorhersage als Option kennt (`Toolchain.supportsXRPrediction`); `nil` ohne
+        /// Toolchain.
+        var xrPredictionSupported: Bool?
         var toolchainChoices = ToolchainChoices()
         /// Der neueste Stand der Spielstände je Spiel, soweit einer auf dem Mac liegt.
         var saves: [String: SaveSnapshot] = [:]
@@ -72,6 +75,8 @@ enum Probe {
         s.experimentalExpected = experimental
         let metalFX = AppModel.metalFXExpected(toolchain: toolchain)
         s.metalFXExpected = metalFX
+        s.xrPredictionSupported = toolchain?.supportsXRPrediction
+        let xrPrediction = AppModel.xrPredictionExpected(supported: s.xrPredictionSupported)
         OtherSources.use(recipes: paths.recipes)
         if let recipes = paths.recipes {
             do {
@@ -86,7 +91,7 @@ enum Probe {
                 func game(_ r: Recipe, draft: Bool, tested: Recipe? = nil) -> Game {
                     Probe.game(r, draft: draft, tested: tested, variants: variants, sources: sources, paths: paths, apps: apps,
                                toolchainRevision: revision, pin: choices.games[r.id], bundlePrefix: bundlePrefix,
-                               experimental: experimental, metalFX: metalFX)
+                               experimental: experimental, metalFX: metalFX, xrPrediction: xrPrediction?(r.id))
                 }
                 let bundled = try RecipeStore(directory: recipes).loadAll()
                 // Entwürfe für ungetestete Spiele, die schon nachgeschlagen wurden. Ein mitgeliefertes Rezept für
@@ -143,7 +148,7 @@ enum Probe {
     /// der Kaufquelle nur dieses eine Spiel neu bestimmen muss und nicht alles.
     static func game(_ r: Recipe, draft: Bool, tested: Recipe?, variants: [Recipe], sources: [Recipe], paths: Paths,
                      apps: [InstalledApp]?, toolchainRevision: Int?, pin: ToolchainChoices.Pin? = nil, bundlePrefix: String,
-                     experimental: Bool? = nil, metalFX: Bool? = nil) -> Game {
+                     experimental: Bool? = nil, metalFX: Bool? = nil, xrPrediction: Bool? = nil) -> Game {
         // Geprüft ist die Fassung ohne Wahl und jede weitere mit eigenem Rezept; alles andere ist eine
         // ungetestete aus dem Store, und dann nennt das Spiel die, die ohne Wahl gilt.
         let own = tested.map { t in variants.filter { $0.id == t.id && $0.versionCode != t.versionCode } } ?? []
@@ -157,7 +162,7 @@ enum Probe {
         var g = Game(recipe: r,
              status: GameStatus.of(recipe: r, store: paths.store, apps: apps, toolchainVersion: toolchainRevision, pin: pin,
                                     bundlePrefix: bundlePrefix, otherSourceBuilds: Set(foreign), experimental: experimental,
-                                    metalFX: metalFX),
+                                    metalFX: metalFX, xrPrediction: xrPrediction),
              // Das Titelbild gehört zum Spiel, nicht zur Kaufquelle: Fehlt es bei dieser, gilt das der anderen.
              cover: (StartHero.choose(recipe: r, store: paths.store) ?? tested.flatMap { StartHero.choose(recipe: $0, store: paths.store) })
                  .flatMap { NSImage(data: $0.image) },
