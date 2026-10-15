@@ -6,8 +6,6 @@ import SwiftUI
 struct GamesView: View {
     @EnvironmentObject var model: AppModel
 
-    private var shown: [Game] { model.shownGames }
-
     /// Die Filter der Übersicht, als einzelne Ansichten: für eine Zeile oder zum Umbrechen.
     @ViewBuilder private var filterToggles: some View {
         Text(L("Show only:", "Nur zeigen:")).foregroundStyle(.secondary)
@@ -39,8 +37,9 @@ struct GamesView: View {
             ProgressView().controlSize(.small)
             Text(L("Searching the catalogue …", "Katalog wird durchsucht …")).font(.callout).foregroundStyle(.secondary)
         }
-        if model.updatable.count > 1 {
-            Button(L("Update All (\(model.updatable.count))", "Alle aktualisieren (\(model.updatable.count))")) { model.updateAll() }
+        let updatable = model.updatable.count
+        if updatable > 1 {
+            Button(L("Update All (\(updatable))", "Alle aktualisieren (\(updatable))")) { model.updateAll() }
         }
         if model.checkingOwnership {
             ProgressView().controlSize(.small)
@@ -49,6 +48,8 @@ struct GamesView: View {
     }
 
     var body: some View {
+        // Einmal je Neuzeichnen gefiltert und sortiert (und im Modell gemerkt, bis sich etwas ändert).
+        let shown = model.shownGames
         NavigationStack(path: $model.gamePath) {
             ScrollView {
                 if model.loadProblem == nil, !model.games.isEmpty {
@@ -610,13 +611,13 @@ struct GameDetail: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 6) {
+                        let blocked = model.blocker(for: game)
                         Button(action: { model.install(game) }) {
                             Text(actionTitle).frame(minWidth: 150)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(model.blocker(for: game) != nil)
-                        let blocked = model.blocker(for: game)
+                        .disabled(blocked != nil)
                         if let why = blocked {
                             Text(why).font(.callout).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.trailing).frame(maxWidth: 280, alignment: .trailing)
